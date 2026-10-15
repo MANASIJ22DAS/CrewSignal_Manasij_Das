@@ -73,8 +73,7 @@ def prepare_dataframe(df):
     result['sex'] = result['sex'].astype(str).str.strip().str.upper()
     result['status'] = result['status'].astype(str).str.strip()
     result = result.dropna(subset=['astronaut_id', 'astronaut_name', 'age', 'sex', 'time', 'pulse', 'body_temperature', 'SpO2', 'status'])
-    result = result.reset_index(drop=True)
-    return result
+    return result.reset_index(drop=True)
 
 
 def build_models():
@@ -91,15 +90,8 @@ def build_models():
     if len(df) < 12:
         return None, {'error': 'insufficient_data', 'rows': len(df)}
 
-    cat_cols = ['astronaut_id', 'astronaut_name', 'sex']
-    num_cols = ['age', 'pulse', 'body_temperature', 'SpO2']
-
-    for col in cat_cols:
-        df[col] = df[col].astype(str)
-
     df['time_elapsed'] = (df['time'] - df['time'].min()).dt.total_seconds() / 60.0
     feature_cols = ['astronaut_id', 'astronaut_name', 'age', 'sex', 'time_elapsed', 'pulse', 'body_temperature', 'SpO2']
-
     X = df[feature_cols].copy()
     y = df['status'].copy()
 
@@ -157,7 +149,8 @@ def build_models():
         }
     }
 
-    joblib.dump({'rf': rf, 'svm': svm, 'label_encoder': label_encoder, 'feature_columns': feature_cols}, os.path.join(MODEL_DIR, 'crew_models.joblib'))
+    model_bundle = {'rf': rf, 'svm': svm, 'label_encoder': label_encoder, 'feature_columns': feature_cols}
+    joblib.dump(model_bundle, os.path.join(MODEL_DIR, 'crew_models.joblib'))
     rf_model = rf
     svm_model = svm
     return metrics, None
@@ -189,15 +182,14 @@ def predict():
         if key not in payload:
             return jsonify({'error': 'missing_field', 'field': key}), 400
 
-    global rf_model, svm_model
     model_bundle_path = os.path.join(MODEL_DIR, 'crew_models.joblib')
     if not os.path.exists(model_bundle_path):
         return jsonify({'error': 'models_not_trained'}), 400
+
     bundle = joblib.load(model_bundle_path)
     rf_model = bundle['rf']
     svm_model = bundle['svm']
     label_encoder = bundle['label_encoder']
-    feature_columns = bundle['feature_columns']
 
     record = {
         'astronaut_id': str(payload['astronaut_id']).strip(),
@@ -213,8 +205,6 @@ def predict():
     if pd.isna(record['time']):
         return jsonify({'error': 'invalid_time'}), 400
 
-    time_min = pd.to_datetime(record['time'])
-    record['time_elapsed'] = (time_min - time_min).total_seconds() / 60.0
     feature = pd.DataFrame([{
         'astronaut_id': record['astronaut_id'],
         'astronaut_name': record['astronaut_name'],
@@ -274,5 +264,5 @@ def voice():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
-
+    port = int(os.getenv('PORT', '5000'))
+    app.run(host='0.0.0.0', port=port)
