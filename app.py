@@ -22,6 +22,7 @@ CONFIG_PATH = os.getenv('CONFIG_PATH', 'config.json')
 os.makedirs(MODEL_DIR, exist_ok=True)
 rf_model = None
 svm_model = None
+MODEL_METRICS = None
 
 
 def normalize_name(value):
@@ -108,7 +109,7 @@ THRESHOLDS = load_thresholds()
 
 
 def build_models():
-    global rf_model, svm_model
+    global rf_model, svm_model, MODEL_METRICS
     if not os.path.exists(DATA_PATH):
         return None, {'error': 'data_not_found', 'path': DATA_PATH}
 
@@ -184,6 +185,7 @@ def build_models():
     joblib.dump(model_bundle, os.path.join(MODEL_DIR, 'crew_models.joblib'))
     rf_model = rf
     svm_model = svm
+    MODEL_METRICS = metrics
     return metrics, None
 
 
@@ -203,6 +205,27 @@ def train_models():
     if error:
         return jsonify(error), 400
     return jsonify({'status': 'trained', 'metrics': metrics})
+
+
+@app.route('/api/metrics')
+def model_metrics():
+    if MODEL_METRICS:
+        return jsonify({'metrics': MODEL_METRICS})
+    return jsonify({}), 204
+
+
+@app.before_first_request
+def ensure_models_trained():
+    # Train models (or load) once before serving the first request so dashboard can use trained models immediately
+    try:
+        metrics, error = build_models()
+        if error:
+            # If training fails, log to stdout — in production you might want to integrate with proper logging
+            print('Model build error on startup:', error)
+        else:
+            print('Models trained and ready on startup')
+    except Exception as e:
+        print('Unexpected error while training models on startup:', str(e))
 
 
 @app.route('/api/predict', methods=['POST'])
