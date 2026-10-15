@@ -139,8 +139,9 @@ function updateChangeSummary(entries) {
 
 function updateConnectivityStatus() {
   const isOnline = navigator.onLine
+  const localEntries = JSON.parse(localStorage.getItem('crewSignalEntries') || '[]').length
   const timeout = setTimeout(() => {
-    connectivityStatus.textContent = isOnline ? 'Server timeout / offline mode' : 'Offline mode'
+    connectivityStatus.textContent = isOnline ? 'Server timeout • local cache active' : 'Offline • local cache active'
     connectivityStatus.style.color = '#ffb454'
   }, 2000)
 
@@ -148,14 +149,12 @@ function updateConnectivityStatus() {
     .then(response => response.json())
     .then(() => {
       clearTimeout(timeout)
-      const localEntries = JSON.parse(localStorage.getItem('crewSignalEntries') || '[]').length
-      connectivityStatus.textContent = isOnline ? `Online • local data: ${localEntries}` : `Offline • local data: ${localEntries}`
+      connectivityStatus.textContent = isOnline ? `Online • server active • local data: ${localEntries}` : `Offline • local data: ${localEntries}`
       connectivityStatus.style.color = isOnline ? '#64d99b' : '#ffb454'
     })
     .catch(() => {
       clearTimeout(timeout)
-      const localEntries = JSON.parse(localStorage.getItem('crewSignalEntries') || '[]').length
-      connectivityStatus.textContent = isOnline ? `Online (server not responding) • ${localEntries} local` : `Offline • ${localEntries} local`
+      connectivityStatus.textContent = isOnline ? `Online • server timeout • local data: ${localEntries}` : `Offline • local data: ${localEntries}`
       connectivityStatus.style.color = '#ffb454'
     })
 }
