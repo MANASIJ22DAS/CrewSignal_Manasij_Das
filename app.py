@@ -6,59 +6,75 @@ import joblib
 from datetime import datetime
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
+from sklearn.preprocessing import LabelEncoder
 
 app = Flask(__name__, static_folder='static')
-DATA_PATH = 'Health data.csv'
-MODEL_DIR = 'models'
+DATA_PATH = os.getenv('DATA_PATH', 'Health data.csv')
+MODEL_DIR = os.getenv('MODEL_DIR', 'models')
 os.makedirs(MODEL_DIR, exist_ok=True)
 rf_model = None
 svm_model = None
 
 
-def normalize_name(name):
-    return str(name).strip().lower().replace(' ', '_')
+def normalize_name(value):
+    return str(value).strip().lower().replace(' ', '_')
 
 
 def resolve_columns(df):
-    columns = {}
+    cols = {}
     for col in df.columns:
         key = normalize_name(col)
         if 'astronaut' in key and 'id' in key:
-            columns['astronaut_id'] = col
+            cols['astronaut_id'] = col
         elif 'astronaut' in key and 'name' in key:
-            columns['astronaut_name'] = col
+            cols['astronaut_name'] = col
         elif 'age' in key:
-            columns['age'] = col
+            cols['age'] = col
         elif 'sex' in key:
-            columns['sex'] = col
+            cols['sex'] = col
         elif 'time' in key:
-            columns['time'] = col
+            cols['time'] = col
         elif 'pulse' in key:
-            columns['pulse'] = col
-        elif 'temperature' in key or 'temp' in key or 'body' in key:
-            columns['body_temperature'] = col
+            cols['pulse'] = col
+        elif 'body' in key or 'temperature' in key or 'temp' in key:
+            cols['body_temperature'] = col
         elif 'spo2' in key or 'oxygen' in key:
-            columns['SpO2'] = col
+            cols['SpO2'] = col
         elif 'status' in key or 'label' in key or 'health' in key:
-            columns['status'] = col
-    return columns
+            cols['status'] = col
+    return cols
 
 
-def safe_to_numeric(series):
-    return pd.to_numeric(series, errors='coerce')
+def coerce_numeric(frame, columns):
+    for col in columns:
+        frame[col] = pd.to_numeric(frame[col], errors='coerce')
+    return frame
 
 
-def encode_target(series):
-    s = series.astype(str).str.strip()
-    unique = list(dict.fromkeys(s.dropna().tolist()))
-    mapping = {v: idx for idx, v in enumerate(unique)}
-    encoded = s.map(mapping)
-    return encoded.astype(float), mapping
+def prepare_dataframe(df):
+    cols = resolve_columns(df)
+    required = ['astronaut_id', 'astronaut_name', 'age', 'sex', 'time', 'pulse', 'body_temperature', 'SpO2', 'status']
+    missing = [name for name in required if name not in cols]
+    if missing:
+        raise ValueError(f'Missing required columns: {missing}')
+
+    result = df[[cols['astronaut_id'], cols['astronaut_name'], cols['age'], cols['sex'], cols['time'], cols['pulse'], cols['body_temperature'], cols['SpO2'], cols['status']]].copy()
+    result.columns = ['astronaut_id', 'astronaut_name', 'age', 'sex', 'time', 'pulse', 'body_temperature', 'SpO2', 'status']
+    result['astronaut_id'] = result['astronaut_id'].astype(str).str.strip()
+    result['astronaut_name'] = result['astronaut_name'].astype(str).str.strip()
+    result['time'] = pd.to_datetime(result['time'], errors='coerce')
+    result = coerce_numeric(result, ['age', 'pulse', 'body_temperature', 'SpO2'])
+    result['sex'] = result['sex'].astype(str).str.strip().str.upper()
+    result['status'] = result['status'].astype(str).str.strip()
+    result = result.dropna(subset=['astronaut_id', 'astronaut_name', 'age', 'sex', 'time', 'pulse', 'body_temperature', 'SpO2', 'status'])
+    result = result.reset_index(drop=True)
+    return result
 
 
 def build_models():
@@ -67,46 +83,58 @@ def build_models():
         return None, {'error': 'data_not_found', 'path': DATA_PATH}
 
     df = pd.read_csv(DATA_PATH)
-    cols = resolve_columns(df)
-    required = ['pulse', 'body_temperature', 'SpO2', 'status']
-    missing = [name for name in required if name not in cols]
-    if missing:
-        return None, {'error': 'missing_columns', 'missing': missing, 'available': list(df.columns)}
+    try:
+        df = prepare_dataframe(df)
+    except ValueError as exc:
+        return None, {'error': 'missing_columns', 'message': str(exc)}
 
-    X = df[[cols['pulse'], cols['body_temperature'], cols['SpO2']]].copy()
-    X = X.apply(safe_to_numeric)
-    y_raw = df[cols['status']].copy()
-    y, _ = encode_target(y_raw)
+    if len(df) < 12:
+        return None, {'error': 'insufficient_data', 'rows': len(df)}
 
-    valid = X.notna().all(axis=1) & y.notna()
-    X = X[valid]
-    y = y[valid].astype(int)
+    cat_cols = ['astronaut_id', 'astronaut_name', 'sex']
+    num_cols = ['age', 'pulse', 'body_temperature', 'SpO2']
 
-    if len(X) < 10:
-        return None, {'error': 'insufficient_data', 'rows': len(X)}
-    if len(np.unique(y)) < 2:
-        return None, {'error': 'insufficient_classes', 'classes': sorted(np.unique(y).tolist())}
+    for col in cat_cols:
+        df[col] = df[col].astype(str)
+
+    df['time_elapsed'] = (df['time'] - df['time'].min()).dt.total_seconds() / 60.0
+    feature_cols = ['astronaut_id', 'astronaut_name', 'age', 'sex', 'time_elapsed', 'pulse', 'body_temperature', 'SpO2']
+
+    X = df[feature_cols].copy()
+    y = df['status'].copy()
+
+    label_encoder = LabelEncoder()
+    y_encoded = label_encoder.fit_transform(y)
+
+    categorical_transformer = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
+    numeric_transformer = Pipeline([
+        ('imputer', SimpleImputer(strategy='median')),
+        ('scaler', StandardScaler())
+    ])
+
+    preprocessor = ColumnTransformer([
+        ('cat', categorical_transformer, ['astronaut_id', 'astronaut_name', 'sex']),
+        ('num', numeric_transformer, ['age', 'time_elapsed', 'pulse', 'body_temperature', 'SpO2'])
+    ])
 
     rf = Pipeline([
-        ('imputer', SimpleImputer(strategy='median')),
-        ('scaler', StandardScaler()),
+        ('preprocessor', preprocessor),
         ('model', RandomForestClassifier(n_estimators=60, max_depth=8, min_samples_leaf=2, random_state=42))
     ])
 
     svm = Pipeline([
-        ('imputer', SimpleImputer(strategy='median')),
-        ('scaler', StandardScaler()),
+        ('preprocessor', preprocessor),
         ('model', SVC(kernel='rbf', C=2.0, gamma='scale', probability=True, random_state=42, max_iter=3000))
     ])
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    X_train, X_test, y_train, y_test = train_test_split(X, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded)
     rf.fit(X_train, y_train)
     svm.fit(X_train, y_train)
 
     rf_pred = rf.predict(X_test)
     svm_pred = svm.predict(X_test)
 
-    cv_splits = min(3, min(np.bincount(y).min(), 3))
+    cv_splits = min(3, min(np.bincount(y_encoded).min(), 3))
     if cv_splits < 2:
         cv_splits = 2
 
@@ -116,7 +144,7 @@ def build_models():
             'precision': round(float(precision_score(y_test, rf_pred, average='weighted', zero_division=0)), 6),
             'recall': round(float(recall_score(y_test, rf_pred, average='weighted', zero_division=0)), 6),
             'f1_score': round(float(f1_score(y_test, rf_pred, average='weighted', zero_division=0)), 6),
-            'cv_score': round(float(np.mean(cross_val_score(rf, X, y, cv=StratifiedKFold(n_splits=cv_splits, shuffle=True, random_state=42)))), 6),
+            'cv_score': round(float(np.mean(cross_val_score(rf, X, y_encoded, cv=StratifiedKFold(n_splits=cv_splits, shuffle=True, random_state=42)))), 6),
             'confusion_matrix': confusion_matrix(y_test, rf_pred).tolist()
         },
         'svm': {
@@ -124,13 +152,12 @@ def build_models():
             'precision': round(float(precision_score(y_test, svm_pred, average='weighted', zero_division=0)), 6),
             'recall': round(float(recall_score(y_test, svm_pred, average='weighted', zero_division=0)), 6),
             'f1_score': round(float(f1_score(y_test, svm_pred, average='weighted', zero_division=0)), 6),
-            'cv_score': round(float(np.mean(cross_val_score(svm, X, y, cv=StratifiedKFold(n_splits=cv_splits, shuffle=True, random_state=42)))), 6),
+            'cv_score': round(float(np.mean(cross_val_score(svm, X, y_encoded, cv=StratifiedKFold(n_splits=cv_splits, shuffle=True, random_state=42)))), 6),
             'confusion_matrix': confusion_matrix(y_test, svm_pred).tolist()
         }
     }
 
-    joblib.dump(rf, os.path.join(MODEL_DIR, 'rf_model.joblib'))
-    joblib.dump(svm, os.path.join(MODEL_DIR, 'svm_model.joblib'))
+    joblib.dump({'rf': rf, 'svm': svm, 'label_encoder': label_encoder, 'feature_columns': feature_cols}, os.path.join(MODEL_DIR, 'crew_models.joblib'))
     rf_model = rf
     svm_model = svm
     return metrics, None
@@ -157,29 +184,47 @@ def train_models():
 @app.route('/api/predict', methods=['POST'])
 def predict():
     payload = request.get_json(silent=True) or {}
-    required = ['pulse', 'body_temperature', 'SpO2']
+    required = ['astronaut_id', 'astronaut_name', 'age', 'sex', 'time', 'pulse', 'body_temperature', 'SpO2']
     for key in required:
         if key not in payload:
             return jsonify({'error': 'missing_field', 'field': key}), 400
 
     global rf_model, svm_model
-    if rf_model is None:
-        rf_path = os.path.join(MODEL_DIR, 'rf_model.joblib')
-        if os.path.exists(rf_path):
-            rf_model = joblib.load(rf_path)
-        else:
-            return jsonify({'error': 'models_not_trained'}), 400
-    if svm_model is None:
-        svm_path = os.path.join(MODEL_DIR, 'svm_model.joblib')
-        if os.path.exists(svm_path):
-            svm_model = joblib.load(svm_path)
-        else:
-            return jsonify({'error': 'models_not_trained'}), 400
+    model_bundle_path = os.path.join(MODEL_DIR, 'crew_models.joblib')
+    if not os.path.exists(model_bundle_path):
+        return jsonify({'error': 'models_not_trained'}), 400
+    bundle = joblib.load(model_bundle_path)
+    rf_model = bundle['rf']
+    svm_model = bundle['svm']
+    label_encoder = bundle['label_encoder']
+    feature_columns = bundle['feature_columns']
 
-    pulse = float(payload['pulse'])
-    body_temperature = float(payload['body_temperature'])
-    spo2 = float(payload['SpO2'])
-    feature = np.array([[pulse, body_temperature, spo2]], dtype=float)
+    record = {
+        'astronaut_id': str(payload['astronaut_id']).strip(),
+        'astronaut_name': str(payload['astronaut_name']).strip(),
+        'age': float(payload['age']),
+        'sex': str(payload['sex']).strip().upper(),
+        'time': pd.to_datetime(payload['time'], errors='coerce'),
+        'pulse': float(payload['pulse']),
+        'body_temperature': float(payload['body_temperature']),
+        'SpO2': float(payload['SpO2'])
+    }
+
+    if pd.isna(record['time']):
+        return jsonify({'error': 'invalid_time'}), 400
+
+    time_min = pd.to_datetime(record['time'])
+    record['time_elapsed'] = (time_min - time_min).total_seconds() / 60.0
+    feature = pd.DataFrame([{
+        'astronaut_id': record['astronaut_id'],
+        'astronaut_name': record['astronaut_name'],
+        'age': record['age'],
+        'sex': record['sex'],
+        'time_elapsed': 0.0,
+        'pulse': record['pulse'],
+        'body_temperature': record['body_temperature'],
+        'SpO2': record['SpO2']
+    }])
 
     rf_pred = int(rf_model.predict(feature)[0])
     svm_pred = int(svm_model.predict(feature)[0])
@@ -187,48 +232,24 @@ def predict():
     svm_prob = svm_model.predict_proba(feature)[0].tolist()
     svm_decision = svm_model.decision_function(feature)[0].tolist()
     agreement = 'agreement' if rf_pred == svm_pred else 'disagreement'
-    worst_condition_label = int(max(rf_model.classes_))
 
-    if pulse > 100 or spo2 < 90 or body_temperature > 38:
+    label_map = {idx: label for idx, label in enumerate(label_encoder.classes_)}
+    rf_label = label_map.get(rf_pred, str(rf_pred))
+    svm_label = label_map.get(svm_pred, str(svm_pred))
+
+    if record['pulse'] > 100 or record['SpO2'] < 90 or record['body_temperature'] > 38:
         risk = 'Critical'
         next_step = 'Immediate clinical escalation and repeat measurement within 5 minutes.'
-    elif pulse > 90 or spo2 < 95 or body_temperature > 37.5:
+    elif record['pulse'] > 90 or record['SpO2'] < 95 or record['body_temperature'] > 37.5:
         risk = 'Moderate'
         next_step = 'Repeat the measurement, log symptoms, and escalate through the approved protocol.'
     else:
         risk = 'Low'
         next_step = 'Continue routine monitoring and log any new symptoms.'
 
-    record = {
-        'astronaut_id': payload.get('astronaut_id', ''),
-        'astronaut_name': payload.get('astronaut_name', ''),
-        'age': payload.get('age', ''),
-        'sex': payload.get('sex', ''),
-        'time': payload.get('time', ''),
-        'pulse': pulse,
-        'body_temperature': body_temperature,
-        'SpO2': spo2,
-        'rf_pred': rf_pred,
-        'svm_pred': svm_pred,
-        'agreement_status': agreement,
-        'overall_risk_category': risk,
-        'recommended_next_step': next_step,
-        'timestamp': datetime.utcnow().isoformat(),
-        'pulse_change': payload.get('pulse_change', 0),
-        'body_temperature_change': payload.get('body_temperature_change', 0),
-        'spo2_change': payload.get('spo2_change', 0)
-    }
-
-    if os.path.exists('records.csv'):
-        history = pd.read_csv('records.csv')
-        history = pd.concat([history, pd.DataFrame([record])], ignore_index=True)
-        history.to_csv('records.csv', index=False)
-    else:
-        pd.DataFrame([record]).to_csv('records.csv', index=False)
-
     return jsonify({
-        'rf_predicted_health_status': rf_pred,
-        'svm_predicted_health_status': svm_pred,
+        'rf_predicted_health_status': rf_label,
+        'svm_predicted_health_status': svm_label,
         'model_agreement_status': agreement,
         'random_forest_probability': rf_prob,
         'svm_probability': svm_prob,
@@ -236,7 +257,7 @@ def predict():
         'overall_risk_category': risk,
         'recommended_next_step': next_step,
         'rule_based_risk': risk,
-        'worst_condition_label': worst_condition_label
+        'worst_condition_label': str(label_encoder.classes_[-1]) if len(label_encoder.classes_) else ''
     })
 
 
@@ -254,3 +275,4 @@ def voice():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
+
