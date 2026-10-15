@@ -1,0 +1,8 @@
+{
+  "short_name": "CrewSignal",
+  "name": "CrewSignal",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#081b2a",
+  "theme_color": "#1fb6ff"
+}

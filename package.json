@@ -1,0 +1,8 @@
+{
+  "name": "CrewSignalFrontend",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "plotly.js-dist": "^2.24.1"
+  }
+}

@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CrewSignal</title>
+  <meta name="theme-color" content="#1fb6ff">
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">HealthTech • Mission Support</div>
+        <h1>CrewSignal</h1>
+      </div>
+      <div id="connectivityStatus" class="status-pill">Checking connectivity...</div>
+    </header>
+
+    <main class="grid">
+      <section class="panel form-panel">
+        <form id="healthForm">
+          <div class="field-row">
+            <input id="astronaut_id" placeholder="Astronaut ID" required>
+            <input id="astronaut_name" placeholder="Astronaut Name" required>
+          </div>
+          <div class="field-row">
+            <input id="age" type="number" placeholder="Age" required>
+            <select id="sex" required>
+              <option value="M">Male</option>
+              <option value="F">Female</option>
+              <option value="O">Other</option>
+            </select>
+          </div>
+          <div class="field-row">
+            <input id="time" placeholder="Time" required>
+          </div>
+          <div class="field-row">
+            <input id="pulse" type="number" step="0.1" placeholder="Pulse" required>
+            <input id="body_temperature" type="number" step="0.1" placeholder="Body Temperature" required>
+            <input id="SpO2" type="number" step="0.1" placeholder="SpO2 Level" required>
+          </div>
+          <div class="button-row">
+            <button type="button" id="saveLocalBtn">Save Local</button>
+            <button type="button" id="predictBtn">Predict</button>
+            <button type="button" id="trainBtn">Train Models</button>
+          </div>
+        </form>
+
+        <div id="percentChanges" class="info-box">No readings yet</div>
+        <div id="ruleOutput" class="info-box accent">Rule-based output pending</div>
+        <div id="modelOutput" class="info-box dark">ML output pending</div>
+      </section>
+
+      <section class="panel chart-panel">
+        <div id="heartRateChart" class="chart-box"></div>
+        <div id="tempChart" class="chart-box"></div>
+        <div id="spo2Chart" class="chart-box"></div>
+      </section>
+
+      <section class="panel metrics-panel">
+        <h2>Model Performance</h2>
+        <div id="metricsArea"></div>
+        <div id="performanceChart" class="chart-box"></div>
+        <div id="rfCmChart" class="chart-box"></div>
+        <div id="svmCmChart" class="chart-box"></div>
+      </section>
+    </main>
+  </div>
+
+  <audio id="alertAudio" preload="auto" src="/emergency_voice.mp3"></audio>
+  <script src="/static/idb.js"></script>
+  <script src="/static/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('/static/service-worker.js'))
+    }
+  </script>
+</body>
+</html>
