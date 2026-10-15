@@ -15,7 +15,6 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.preprocessing import LabelEncoder
 import threading
-import time
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -143,7 +142,6 @@ def load_models_from_disk():
 
 
 def _make_synthetic_dataset(n_samples=120):
-    # Create a simple synthetic dataset that resembles the expected schema
     rng = np.random.default_rng(42)
     ids = [f'A{(i%10)+1}' for i in range(n_samples)]
     names = [f'Crew_{(i%10)+1}' for i in range(n_samples)]
@@ -151,11 +149,9 @@ def _make_synthetic_dataset(n_samples=120):
     sexes = rng.choice(['M','F'], size=n_samples)
     start = datetime.utcnow() - timedelta(hours=1)
     times = [start + timedelta(seconds=int(i*30)) for i in range(n_samples)]
-    # base vitals around normal with some noise
     pulse = (rng.normal(75,10,size=n_samples)).clip(40,160)
     temp = (rng.normal(36.6,0.6,size=n_samples)).clip(34,41)
     spo2 = (rng.normal(97,2,size=n_samples)).clip(80,100)
-    # rule-based status
     status = []
     for p,t,s in zip(pulse,temp,spo2):
         st = 'healthy'
@@ -179,10 +175,6 @@ def _make_synthetic_dataset(n_samples=120):
 
 
 def build_models():
-    """
-    Build models from DATA_PATH if available. If DATA_PATH is missing, generate a small synthetic dataset
-    so the app works out-of-the-box. Returns (metrics, error) where error is None on success.
-    """
     global rf_model, svm_model, label_encoder, MODEL_METRICS
 
     if not os.path.exists(DATA_PATH):
@@ -418,13 +410,26 @@ def voice():
     return send_from_directory('.', 'emergency_voice.mp3')
 
 
-# Try to load models at startup (non-blocking)
+# Try to load models at startup (non-blocking); if not present, start background training
 try:
     loaded = load_models_from_disk()
     if loaded:
         logging.info('Models available at startup')
     else:
-        logging.info('No pre-trained model found at startup — using synthetic data for demo; call /api/train to retrain with your CSV')
+        logging.info('No pre-trained model found at startup — starting background training')
+        def _startup_train():
+            global MODEL_METRICS
+            try:
+                metrics, error = build_models()
+                if error:
+                    logging.error('Startup training error: %s', error)
+                else:
+                    MODEL_METRICS = metrics
+                    logging.info('Startup training finished and models saved')
+            except Exception:
+                logging.exception('Unexpected error during startup training')
+        t = threading.Thread(target=_startup_train, daemon=True)
+        t.start()
 except Exception:
     logging.exception('Error while loading models at startup')
 
