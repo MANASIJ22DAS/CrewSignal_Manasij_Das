@@ -55,6 +55,23 @@ def _sanitize_for_json(obj):
     return str(obj)
 
 
+def _safe_label(label):
+    """Return a JSON-safe string for a label; convert NaN/None to empty string."""
+    try:
+        # Unwrap numpy scalar
+        if isinstance(label, np.generic):
+            label = label.item()
+        if label is None:
+            return ''
+        if isinstance(label, float):
+            if math.isnan(label) or math.isinf(label):
+                return ''
+            return str(label)
+        return str(label)
+    except Exception:
+        return ''
+
+
 def normalize_name(value):
     return str(value).strip().lower().replace(' ', '_')
 
@@ -506,7 +523,8 @@ def predict():
         svm_decision = []
     agreement = 'agreement' if rf_pred == svm_pred else 'disagreement'
 
-    label_map = {idx: label for idx, label in enumerate(label_encoder_local.classes_)}
+    # Build a label map with safe string labels (convert NaN to empty string)
+    label_map = {idx: _safe_label(label) for idx, label in enumerate(label_encoder_local.classes_)}
     rf_label = label_map.get(rf_pred, str(rf_pred))
     svm_label = label_map.get(svm_pred, str(svm_pred))
 
@@ -537,7 +555,7 @@ def predict():
         'overall_risk_category': risk,
         'recommended_next_step': next_step,
         'rule_based_risk': risk,
-        'worst_condition_label': str(label_encoder_local.classes_[-1]) if len(label_encoder_local.classes_) else ''
+        'worst_condition_label': _safe_label(label_encoder_local.classes_[-1]) if len(label_encoder_local.classes_) else ''
     }
     return jsonify(_sanitize_for_json(response_payload))
 
