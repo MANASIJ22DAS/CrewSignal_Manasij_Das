@@ -14,6 +14,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.preprocessing import LabelEncoder
+import threading
 
 app = Flask(__name__, static_folder='static')
 DATA_PATH = os.getenv('DATA_PATH', 'Health data.csv')
@@ -214,9 +215,8 @@ def model_metrics():
     return jsonify({}), 204
 
 
-@app.before_first_request
 def ensure_models_trained():
-    # Train models (or load) once before serving the first request so dashboard can use trained models immediately
+    # Train models (or load) once before serving requests so dashboard can use trained models
     try:
         metrics, error = build_models()
         if error:
@@ -226,6 +226,20 @@ def ensure_models_trained():
             print('Models trained and ready on startup')
     except Exception as e:
         print('Unexpected error while training models on startup:', str(e))
+
+
+# Register startup hook in a Flask-version-compatible way; if decorator is unavailable, run in background
+if hasattr(app, 'before_first_request'):
+    app.before_first_request(ensure_models_trained)
+else:
+    # Try before_serving (available in some Flask versions), otherwise run in a background thread
+    try:
+        if hasattr(app, 'before_serving'):
+            app.before_serving(ensure_models_trained)
+        else:
+            threading.Thread(target=ensure_models_trained, daemon=True).start()
+    except Exception:
+        threading.Thread(target=ensure_models_trained, daemon=True).start()
 
 
 @app.route('/api/predict', methods=['POST'])
