@@ -95,15 +95,22 @@ def save_json(data, path="outputs/results.json"):
         json.dump(data, f, indent=2, default=lambda o: (o.tolist() if hasattr(o,"tolist") else str(o)))
 
 def plot_trend(df, column, outpath):
+    """Create a scatter plot of x vs y where x is time and y is level.
+    If a timestamp column exists, use it for x. Otherwise fall back to index as pseudo-time.
+    Y-axis label is 'Level' per request.
+    """
     plt.figure(figsize=(8,3))
     if "timestamp" in df.columns:
-        plt.plot(df["timestamp"], df[column], marker='o', linewidth=1)
+        x = df["timestamp"]
+        plt.scatter(x, df[column], s=30)
         plt.gcf().autofmt_xdate()
+        plt.xlabel("Time")
     else:
-        plt.plot(df[column].values, marker='o', linewidth=1)
-    plt.title(f"{column} Trend")
-    plt.xlabel("Index" if "timestamp" not in df.columns else "Time")
-    plt.ylabel(column)
+        x = np.arange(len(df))
+        plt.scatter(x, df[column].values, s=30)
+        plt.xlabel("Index (pseudo-time)")
+    plt.title(f"{column} Scatter (Time vs Level)")
+    plt.ylabel("Level")
     plt.tight_layout()
     plt.savefig(outpath)
     plt.close()
