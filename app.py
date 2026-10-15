@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, send_from_directory
 import os
 import json
+import math
 import numpy as np
 import pandas as pd
 import joblib
@@ -30,6 +31,28 @@ label_encoder = None
 MODEL_METRICS = None
 TRAINING = False
 TRAIN_THREAD = None
+
+
+def _sanitize_for_json(obj):
+    """Recursively convert numpy/NaN values to JSON-safe Python objects."""
+    if isinstance(obj, dict):
+        return {str(k): _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(v) for v in obj]
+    if isinstance(obj, np.ndarray):
+        return _sanitize_for_json(obj.tolist())
+    if isinstance(obj, np.generic):
+        try:
+            return _sanitize_for_json(obj.item())
+        except Exception:
+            return str(obj)
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if isinstance(obj, (int, str, bool)) or obj is None:
+        return obj
+    return str(obj)
 
 
 def normalize_name(value):
@@ -185,6 +208,7 @@ def load_thresholds():
                 config = json.load(f)
     except Exception:
         config = {}
+
     def get_float(key, default):
         val = os.getenv(key)
         if val is not None:
@@ -193,6 +217,7 @@ def load_thresholds():
             except Exception:
                 return float(default)
         return float(config.get(key, default))
+
     thresholds = {
         'PULSE_CRITICAL': get_float('PULSE_CRITICAL', 100),
         'SPO2_CRITICAL': get_float('SPO2_CRITICAL', 90),
@@ -290,7 +315,6 @@ def build_models():
                 df = prepare_dataframe(raw_df)
             except ValueError as exc:
                 logging.warning('Input CSV missing required columns (%s). Attempting to coerce and continue.', str(exc))
-                # Try to coerce by filling defaults within prepare_dataframe already, so re-run
                 try:
                     df = prepare_dataframe(raw_df)
                 except Exception:
@@ -382,7 +406,8 @@ def index():
 
 @app.route('/api/healthcheck')
 def healthcheck():
-    return jsonify({'status': 'ok', 'timestamp': datetime.utcnow().isoformat(), 'model_loaded': bool(MODEL_METRICS)})
+    payload = {'status': 'ok', 'timestamp': datetime.utcnow().isoformat(), 'model_loaded': bool(MODEL_METRICS)}
+    return jsonify(_sanitize_for_json(payload))
 
 
 @app.route('/api/train', methods=['POST'])
@@ -390,7 +415,7 @@ def train_models_endpoint():
     global TRAINING, TRAIN_THREAD
     blocking = request.args.get('blocking', 'false').lower() == 'true'
     if TRAINING:
-        return jsonify({'status': 'training_already_running'}), 202
+        return jsonify(_sanitize_for_json({'status': 'training_already_running'})), 202
 
     def _train():
         global TRAINING, MODEL_METRICS
@@ -410,23 +435,23 @@ def train_models_endpoint():
 
     if blocking:
         _train()
-        return jsonify({'status': 'trained', 'metrics': MODEL_METRICS})
+        return jsonify(_sanitize_for_json({'status': 'trained', 'metrics': MODEL_METRICS}))
     else:
         TRAIN_THREAD = threading.Thread(target=_train, daemon=True)
         TRAIN_THREAD.start()
-        return jsonify({'status': 'training_started'}), 202
+        return jsonify(_sanitize_for_json({'status': 'training_started'})), 202
 
 
 @app.route('/api/train/status')
 def train_status():
-    return jsonify({'training': TRAINING})
+    return jsonify(_sanitize_for_json({'training': TRAINING}))
 
 
 @app.route('/api/metrics')
 def model_metrics_endpoint():
     if MODEL_METRICS:
-        return jsonify({'metrics': MODEL_METRICS})
-    return jsonify({'metrics': None}), 204
+        return jsonify(_sanitize_for_json({'metrics': MODEL_METRICS}))
+    return jsonify(_sanitize_for_json({'metrics': None})), 204
 
 
 @app.route('/api/predict', methods=['POST'])
@@ -435,11 +460,11 @@ def predict():
     required = ['astronaut_id', 'astronaut_name', 'age', 'sex', 'time', 'pulse', 'body_temperature', 'SpO2']
     for key in required:
         if key not in payload:
-            return jsonify({'error': 'missing_field', 'field': key}), 400
+            return jsonify(_sanitize_for_json({'error': 'missing_field', 'field': key})), 400
 
     model_bundle_path = os.path.join(MODEL_DIR, 'crew_models.joblib')
     if not os.path.exists(model_bundle_path):
-        return jsonify({'error': 'models_not_trained', 'message': 'No trained model found. Trigger /api/train'}), 400
+        return jsonify(_sanitize_for_json({'error': 'models_not_trained', 'message': 'No trained model found. Trigger /api/train'})), 400
 
     bundle = joblib.load(model_bundle_path)
     rf_model_local = bundle['rf']
@@ -458,7 +483,7 @@ def predict():
     }
 
     if pd.isna(record['time']):
-        return jsonify({'error': 'invalid_time'}), 400
+        return jsonify(_sanitize_for_json({'error': 'invalid_time'})), 400
 
     feature = pd.DataFrame([{
         'astronaut_id': record['astronaut_id'],
@@ -502,7 +527,7 @@ def predict():
         risk = 'Low'
         next_step = 'Continue routine monitoring and log any new symptoms.'
 
-    return jsonify({
+    response_payload = {
         'rf_predicted_health_status': rf_label,
         'svm_predicted_health_status': svm_label,
         'model_agreement_status': agreement,
@@ -513,14 +538,16 @@ def predict():
         'recommended_next_step': next_step,
         'rule_based_risk': risk,
         'worst_condition_label': str(label_encoder_local.classes_[-1]) if len(label_encoder_local.classes_) else ''
-    })
+    }
+    return jsonify(_sanitize_for_json(response_payload))
 
 
 @app.route('/api/records', methods=['GET'])
 def records():
     if os.path.exists('records.csv'):
-        return jsonify(pd.read_csv('records.csv').to_dict(orient='records'))
-    return jsonify([])
+        data = pd.read_csv('records.csv').to_dict(orient='records')
+        return jsonify(_sanitize_for_json(data))
+    return jsonify(_sanitize_for_json([]))
 
 
 @app.route('/emergency_voice.mp3')
@@ -535,6 +562,7 @@ try:
         logging.info('Models available at startup')
     else:
         logging.info('No pre-trained model found at startup — starting background training')
+
         def _startup_train():
             global MODEL_METRICS
             try:
@@ -546,6 +574,7 @@ try:
                     logging.info('Startup training finished and models saved')
             except Exception:
                 logging.exception('Unexpected error during startup training')
+
         t = threading.Thread(target=_startup_train, daemon=True)
         t.start()
 except Exception:
