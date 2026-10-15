@@ -43,18 +43,41 @@ function saveMeasurement(entry) {
 function readForm() {
   const timeVal = document.getElementById('time').value
   return {
-    astronaut_id: document.getElementById('astronaut_id').value,
-    astronaut_name: document.getElementById('astronaut_name').value,
-    age: document.getElementById('age').value,
-    sex: document.getElementById('sex').value,
+    astronaut_id: String(document.getElementById('astronaut_id').value || '').trim(),
+    astronaut_name: String(document.getElementById('astronaut_name').value || '').trim(),
+    age: Number(document.getElementById('age').value || 0),
+    sex: String(document.getElementById('sex').value || '').trim(),
     time: timeVal && timeVal.trim() !== '' ? timeVal : new Date().toISOString(),
-    pulse: Number(document.getElementById('pulse').value),
-    body_temperature: Number(document.getElementById('body_temperature').value),
-    SpO2: Number(document.getElementById('SpO2').value)
+    pulse: Number(document.getElementById('pulse').value || 0),
+    body_temperature: Number(document.getElementById('body_temperature').value || 0),
+    SpO2: Number(document.getElementById('SpO2').value || 0)
   }
 }
 
+function validationErrors(entry) {
+  const errs = []
+  if (!entry.astronaut_id) errs.push('Astronaut ID is required')
+  if (!entry.astronaut_name) errs.push('Astronaut Name is required')
+  if (!Number.isFinite(entry.age) || entry.age <= 0) errs.push('Age must be a positive number')
+  if (!entry.sex) errs.push('Sex is required')
+  if (!Number.isFinite(entry.pulse) || entry.pulse < 0) errs.push('Pulse must be a non-negative number')
+  if (!Number.isFinite(entry.body_temperature) || entry.body_temperature < 0) errs.push('Body Temperature must be a non-negative number')
+  if (!Number.isFinite(entry.SpO2) || entry.SpO2 < 0) errs.push('SpO2 must be a non-negative number')
+  return errs
+}
+
+function isValidEntry(entry) {
+  const errs = validationErrors(entry)
+  return errs.length === 0
+}
+
 function saveToLocal(entry) {
+  const errs = validationErrors(entry)
+  if (errs.length > 0) {
+    alert('Cannot save: ' + errs.join('; '))
+    return
+  }
+
   const current = JSON.parse(localStorage.getItem('crewSignalEntries') || '[]')
   current.push(entry)
   localStorage.setItem('crewSignalEntries', JSON.stringify(current))
@@ -109,9 +132,9 @@ function updateChangeSummary(entries) {
   }
   const prev = entries[entries.length - 2]
   const curr = entries[entries.length - 1]
-  const pulseDelta = ((Number(curr.pulse) - Number(prev.pulse)) / Number(prev.pulse)) * 100
-  const tempDelta = ((Number(curr.body_temperature) - Number(prev.body_temperature)) / Number(prev.body_temperature)) * 100
-  const spo2Delta = ((Number(curr.SpO2) - Number(prev.SpO2)) / Number(prev.SpO2)) * 100
+  const pulseDelta = ((Number(curr.pulse) - Number(prev.pulse)) / (Number(prev.pulse) || 1)) * 100
+  const tempDelta = ((Number(curr.body_temperature) - Number(prev.body_temperature)) / (Number(prev.body_temperature) || 1)) * 100
+  const spo2Delta = ((Number(curr.SpO2) - Number(prev.SpO2)) / (Number(prev.SpO2) || 1)) * 100
   percentChanges.textContent = `Change since last entry: Pulse ${pulseDelta.toFixed(2)}%, Body Temperature ${tempDelta.toFixed(2)}%, SpO2 ${spo2Delta.toFixed(2)}%`
 }
 
@@ -226,6 +249,12 @@ function handleTrain() {
 
 function handlePredict() {
   const entry = readForm()
+  const errs = validationErrors(entry)
+  if (errs.length > 0) {
+    alert('Cannot predict: ' + errs.join('; '))
+    return
+  }
+
   fetch('/api/predict', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -240,11 +269,11 @@ function handlePredict() {
         modelOutput.textContent = `RF: ${data.rf_predicted_health_status} | SVM: ${data.svm_predicted_health_status} | Agreement: ${data.model_agreement_status}`
       }
       if (data.rf_predicted_health_status === 1 && data.svm_predicted_health_status === 1) {
-        alertAudio.play()
+        try { alertAudio.play() } catch (e) {}
       }
       saveToLocal(entry)
     })
-    .catch(() => saveToLocal(readForm()))
+    .catch(() => saveToLocal(entry))
 }
 
 function init() {
