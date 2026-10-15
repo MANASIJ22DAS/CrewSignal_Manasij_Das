@@ -16,32 +16,57 @@
         <div class="eyebrow">HealthTech • Mission Support</div>
         <h1>CrewSignal</h1>
       </div>
-      <div id="connectivityStatus" class="status-pill">Checking connectivity...</div>
+      <div id="connectivityStatus" class="status-pill" aria-live="polite">Checking connectivity...</div>
     </header>
 
     <main class="grid">
-      <section class="panel form-panel">
-        <form id="healthForm">
+      <section class="panel form-panel" aria-labelledby="monitoring-form-title">
+        <h2 id="monitoring-form-title" class="panel-title">Mission Monitoring</h2>
+        <form id="healthForm" aria-label="Astronaut health form">
           <div class="field-row">
-            <input id="astronaut_id" placeholder="Astronaut ID" required>
-            <input id="astronaut_name" placeholder="Astronaut Name" required>
+            <div class="field-wrap">
+              <label class="sr-only" for="astronaut_id">Astronaut ID</label>
+              <input id="astronaut_id" placeholder="Astronaut ID" required>
+            </div>
+            <div class="field-wrap">
+              <label class="sr-only" for="astronaut_name">Astronaut Name</label>
+              <input id="astronaut_name" placeholder="Astronaut Name" required>
+            </div>
           </div>
           <div class="field-row">
-            <input id="age" type="number" placeholder="Age" required>
-            <select id="sex" required>
-              <option value="">Sex</option>
-              <option value="M">Male</option>
-              <option value="F">Female</option>
-              <option value="O">Other</option>
-            </select>
+            <div class="field-wrap">
+              <label class="sr-only" for="age">Age</label>
+              <input id="age" type="number" placeholder="Age" required>
+            </div>
+            <div class="field-wrap">
+              <label class="sr-only" for="sex">Sex</label>
+              <select id="sex" required>
+                <option value="">Sex</option>
+                <option value="M">Male</option>
+                <option value="F">Female</option>
+                <option value="O">Other</option>
+              </select>
+            </div>
           </div>
           <div class="field-row single">
-            <input id="time" type="text" placeholder="Timestamp" required>
+            <div class="field-wrap">
+              <label class="sr-only" for="time">Timestamp</label>
+              <input id="time" type="text" placeholder="Timestamp" required>
+            </div>
           </div>
-          <div class="field-row">
-            <input id="pulse" type="number" step="0.1" placeholder="Pulse" required>
-            <input id="body_temperature" type="number" step="0.1" placeholder="Body Temperature" required>
-            <input id="SpO2" type="number" step="0.1" placeholder="SpO2 Level" required>
+          <div class="field-row triple">
+            <div class="field-wrap">
+              <label class="sr-only" for="pulse">Pulse</label>
+              <input id="pulse" type="number" step="0.1" placeholder="Pulse" required>
+            </div>
+            <div class="field-wrap">
+              <label class="sr-only" for="body_temperature">Body Temperature</label>
+              <input id="body_temperature" type="number" step="0.1" placeholder="Body Temperature" required>
+            </div>
+            <div class="field-wrap">
+              <label class="sr-only" for="SpO2">SpO2 Level</label>
+              <input id="SpO2" type="number" step="0.1" placeholder="SpO2 Level" required>
+            </div>
           </div>
           <div class="kpi-row">
             <div class="mini-card">
@@ -54,24 +79,24 @@
             </div>
           </div>
           <div class="button-row">
-            <button type="button" id="saveLocalBtn">Save Local</button>
-            <button type="button" id="predictBtn">Predict</button>
-            <button type="button" id="trainBtn">Train Models</button>
+            <button type="button" id="saveLocalBtn" class="primary">Save Local</button>
+            <button type="button" id="predictBtn" class="secondary">Predict</button>
+            <button type="button" id="trainBtn" class="accent">Train Models</button>
           </div>
         </form>
 
-        <div id="percentChanges" class="info-box">No readings yet</div>
-        <div id="ruleOutput" class="info-box accent">Rule-based output pending</div>
-        <div id="modelOutput" class="info-box dark">ML output pending</div>
+        <div id="percentChanges" class="info-box" aria-live="polite">No readings yet</div>
+        <div id="ruleOutput" class="info-box accent" aria-live="polite">Rule-based output pending</div>
+        <div id="modelOutput" class="info-box dark" aria-live="polite">ML output pending</div>
       </section>
 
-      <section class="panel chart-panel">
+      <section class="panel chart-panel" aria-label="Vital trend charts">
         <div id="heartRateChart" class="chart-box"></div>
         <div id="tempChart" class="chart-box"></div>
         <div id="spo2Chart" class="chart-box"></div>
       </section>
 
-      <section class="panel metrics-panel">
+      <section class="panel metrics-panel" aria-label="Model performance panel">
         <h2>Model Performance</h2>
         <div id="metricsArea"></div>
         <div id="performanceChart" class="chart-box"></div>
