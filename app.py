@@ -175,21 +175,42 @@ def _make_synthetic_dataset(n_samples=120):
 
 
 def build_models():
+    """
+    Build models from DATA_PATH if available. If DATA_PATH is missing or the CSV doesn't contain
+    the required columns, generate a small synthetic dataset so the app works out-of-the-box.
+    Returns (metrics, error) where error is None on success.
+    """
     global rf_model, svm_model, label_encoder, MODEL_METRICS
 
+    use_synthetic = False
     if not os.path.exists(DATA_PATH):
         logging.warning('Data path %s not found — generating synthetic dataset for demo/training', DATA_PATH)
         df = _make_synthetic_dataset()
+        use_synthetic = True
     else:
         df = pd.read_csv(DATA_PATH)
+        # check whether required columns exist; if not, fallback to synthetic
+        try:
+            df = prepare_dataframe(df)
+        except ValueError as exc:
+            logging.warning('Input CSV missing required columns (%s). Falling back to synthetic dataset for training.', str(exc))
+            df = _make_synthetic_dataset()
+            use_synthetic = True
 
+    # at this point df should be prepared with expected columns
+    # if the prepared frame doesn't have expected row count, fallback to synthetic
     try:
         df = prepare_dataframe(df)
-    except ValueError as exc:
-        return None, {'error': 'missing_columns', 'message': str(exc)}
+    except Exception as e:
+        # last-resort: synthetic
+        logging.warning('Preparing dataframe failed unexpectedly (%s). Using synthetic dataset.', str(e))
+        df = _make_synthetic_dataset()
+        use_synthetic = True
 
     if len(df) < 12:
-        return None, {'error': 'insufficient_data', 'rows': len(df)}
+        logging.warning('Dataset too small (%d rows). Generating synthetic dataset.', len(df))
+        df = _make_synthetic_dataset()
+        use_synthetic = True
 
     df['time_elapsed'] = (df['time'] - df['time'].min()).dt.total_seconds() / 60.0
     feature_cols = ['astronaut_id', 'astronaut_name', 'age', 'sex', 'time_elapsed', 'pulse', 'body_temperature', 'SpO2']
@@ -250,7 +271,7 @@ def build_models():
         }
     }
 
-    model_bundle = {'rf': rf, 'svm': svm, 'label_encoder': label_encoder, 'feature_columns': feature_cols}
+    model_bundle = {'rf': rf, 'svm': svm, 'label_encoder': label_encoder, 'feature_columns': feature_cols, 'synthetic': use_synthetic}
     save_model_bundle(model_bundle, metrics)
     rf_model = rf
     svm_model = svm
