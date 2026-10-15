@@ -5,32 +5,64 @@ const ruleOutput = document.getElementById('ruleOutput')
 const modelOutput = document.getElementById('modelOutput')
 const alertAudio = document.getElementById('alertAudio')
 const metricsArea = document.getElementById('metricsArea')
+const sessionStartEl = document.getElementById('sessionStart')
+const elapsedTimeEl = document.getElementById('elapsedTime')
 
-const trendState = {
-  pulse: [],
-  body_temperature: [],
-  SpO2: [],
-  labels: []
-}
+const sessionStart = new Date()
+const sessionStartIso = sessionStart.toISOString()
+let sessionStartTime = sessionStart.getTime()
 
 function readForm() {
   return {
     astronaut_id: document.getElementById('astronaut_id').value,
     astronaut_name: document.getElementById('astronaut_name').value,
-    age: document.getElementById('age').value,
+    age: Number(document.getElementById('age').value),
     sex: document.getElementById('sex').value,
-    time: document.getElementById('time').value,
+    time: document.getElementById('time').value || new Date().toLocaleString(),
     pulse: Number(document.getElementById('pulse').value),
     body_temperature: Number(document.getElementById('body_temperature').value),
-    SpO2: Number(document.getElementById('SpO2').value)
+    SpO2: Number(document.getElementById('SpO2').value),
+    session_start: sessionStartIso
   }
+}
+
+function formatElapsed(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
+  const hh = String(Math.floor(totalSeconds / 3600)).padStart(2, '0')
+  const mm = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0')
+  const ss = String(totalSeconds % 60).padStart(2, '0')
+  return `${hh}:${mm}:${ss}`
+}
+
+function updateElapsedTimer() {
+  const elapsedMs = Date.now() - sessionStartTime
+  elapsedTimeEl.textContent = formatElapsed(elapsedMs)
+}
+
+function calculatePercentChange(current, previous, key) {
+  if (!previous || !Number.isFinite(Number(previous[key])) || Number(previous[key]) === 0) {
+    return 0
+  }
+  return ((Number(current[key]) - Number(previous[key])) / Number(previous[key])) * 100
 }
 
 function saveToLocal(entry) {
   const current = JSON.parse(localStorage.getItem('crewSignalEntries') || '[]')
-  current.push(entry)
+  const previous = current[current.length - 1] || null
+  const prepared = { ...entry }
+
+  if (previous) {
+    prepared.pulse_change = calculatePercentChange(prepared, previous, 'pulse')
+    prepared.body_temperature_change = calculatePercentChange(prepared, previous, 'body_temperature')
+    prepared.spo2_change = calculatePercentChange(prepared, previous, 'SpO2')
+  } else {
+    prepared.pulse_change = 0
+    prepared.body_temperature_change = 0
+    prepared.spo2_change = 0
+  }
+
+  current.push(prepared)
   localStorage.setItem('crewSignalEntries', JSON.stringify(current))
-  saveMeasurement(entry)
   updateCharts(current)
   updateChangeSummary(current)
 }
@@ -41,12 +73,14 @@ function updateCharts(entries) {
   const temperature = entries.map(item => Number(item.body_temperature))
   const spo2 = entries.map(item => Number(item.SpO2))
 
-  trendState.pulse = pulse
-  trendState.body_temperature = temperature
-  trendState.SpO2 = spo2
-  trendState.labels = labels
-
-  Plotly.newPlot('heartRateChart', [{ type: 'scatter', mode: 'lines', name: 'Pulse', x: labels, y: pulse, line: { color: '#ff5d73', width: 3 } }], {
+  Plotly.newPlot('heartRateChart', [{
+    type: 'scatter',
+    mode: 'lines',
+    name: 'Pulse',
+    x: labels,
+    y: pulse,
+    line: { color: '#ff5d73', width: 3 }
+  }], {
     margin: { t: 20, r: 20, b: 40, l: 50 },
     paper_bgcolor: 'rgba(0,0,0,0)',
     plot_bgcolor: 'rgba(0,0,0,0)',
@@ -55,7 +89,14 @@ function updateCharts(entries) {
     yaxis: { title: 'Pulse' }
   }, { displayModeBar: false })
 
-  Plotly.newPlot('tempChart', [{ type: 'scatter', mode: 'lines', name: 'Body Temperature', x: labels, y: temperature, line: { color: '#1fb6ff', width: 3 } }], {
+  Plotly.newPlot('tempChart', [{
+    type: 'scatter',
+    mode: 'lines',
+    name: 'Body Temperature',
+    x: labels,
+    y: temperature,
+    line: { color: '#1fb6ff', width: 3 }
+  }], {
     margin: { t: 20, r: 20, b: 40, l: 50 },
     paper_bgcolor: 'rgba(0,0,0,0)',
     plot_bgcolor: 'rgba(0,0,0,0)',
@@ -64,7 +105,14 @@ function updateCharts(entries) {
     yaxis: { title: 'Temperature (°C)' }
   }, { displayModeBar: false })
 
-  Plotly.newPlot('spo2Chart', [{ type: 'scatter', mode: 'lines', name: 'SpO2', x: labels, y: spo2, line: { color: '#64d99b', width: 3 } }], {
+  Plotly.newPlot('spo2Chart', [{
+    type: 'scatter',
+    mode: 'lines',
+    name: 'SpO2',
+    x: labels,
+    y: spo2,
+    line: { color: '#64d99b', width: 3 }
+  }], {
     margin: { t: 20, r: 20, b: 40, l: 50 },
     paper_bgcolor: 'rgba(0,0,0,0)',
     plot_bgcolor: 'rgba(0,0,0,0)',
@@ -79,11 +127,13 @@ function updateChangeSummary(entries) {
     percentChanges.textContent = 'No changes yet'
     return
   }
+
   const prev = entries[entries.length - 2]
   const curr = entries[entries.length - 1]
-  const pulseDelta = ((Number(curr.pulse) - Number(prev.pulse)) / Number(prev.pulse)) * 100
-  const tempDelta = ((Number(curr.body_temperature) - Number(prev.body_temperature)) / Number(prev.body_temperature)) * 100
-  const spo2Delta = ((Number(curr.SpO2) - Number(prev.SpO2)) / Number(prev.SpO2)) * 100
+  const pulseDelta = calculatePercentChange(curr, prev, 'pulse')
+  const tempDelta = calculatePercentChange(curr, prev, 'body_temperature')
+  const spo2Delta = calculatePercentChange(curr, prev, 'SpO2')
+
   percentChanges.textContent = `Change since last entry: Pulse ${pulseDelta.toFixed(2)}%, Body Temperature ${tempDelta.toFixed(2)}%, SpO2 ${spo2Delta.toFixed(2)}%`
 }
 
@@ -113,8 +163,10 @@ function updateConnectivityStatus() {
 function buildMetricCard(title, metrics) {
   const card = document.createElement('div')
   card.className = 'metric-card'
+
   const heading = document.createElement('h3')
   heading.textContent = title
+
   const list = document.createElement('ul')
   const entries = [
     ['Accuracy', metrics.accuracy],
@@ -123,11 +175,13 @@ function buildMetricCard(title, metrics) {
     ['F1-Score', metrics.f1_score],
     ['CV Score', metrics.cv_score]
   ]
+
   entries.forEach(([label, value]) => {
     const item = document.createElement('li')
     item.textContent = `${label}: ${Number(value).toFixed(4)}`
     list.appendChild(item)
   })
+
   card.appendChild(heading)
   card.appendChild(list)
   return card
@@ -146,20 +200,17 @@ function renderModelMetrics(metrics) {
     { type: 'bar', name: 'Random Forest', x: labels, y: rfValues, marker: { color: '#ff5d73' } },
     { type: 'bar', name: 'SVM', x: labels, y: svmValues, marker: { color: '#1fb6ff' } }
   ], {
-    margin: { t: 20, r: 20, b: 50, l: 50 },
+    margin: { t: 20, r: 20, b: 40, l: 50 },
     paper_bgcolor: 'rgba(0,0,0,0)',
     plot_bgcolor: 'rgba(0,0,0,0)',
     font: { color: '#ecf8ff' },
     barmode: 'group'
   }, { displayModeBar: false })
 
-  const rfMatrix = metrics.rf.confusion_matrix
-  const svmMatrix = metrics.svm.confusion_matrix
-
   Plotly.newPlot('rfCmChart', [{
     type: 'heatmap',
-    z: rfMatrix,
-    x: ['Predicted 0', 'Predicted 1'],
+    z: metrics.rf.confusion_matrix,
+    x: ['Pred 0', 'Pred 1'],
     y: ['Actual 0', 'Actual 1'],
     colorscale: 'Plasma'
   }], {
@@ -172,8 +223,8 @@ function renderModelMetrics(metrics) {
 
   Plotly.newPlot('svmCmChart', [{
     type: 'heatmap',
-    z: svmMatrix,
-    x: ['Predicted 0', 'Predicted 1'],
+    z: metrics.svm.confusion_matrix,
+    x: ['Pred 0', 'Pred 1'],
     y: ['Actual 0', 'Actual 1'],
     colorscale: 'Viridis'
   }], {
@@ -198,6 +249,19 @@ function handleTrain() {
 
 function handlePredict() {
   const entry = readForm()
+  const current = JSON.parse(localStorage.getItem('crewSignalEntries') || '[]')
+  const previous = current[current.length - 1] || null
+
+  if (previous) {
+    entry.pulse_change = calculatePercentChange(entry, previous, 'pulse')
+    entry.body_temperature_change = calculatePercentChange(entry, previous, 'body_temperature')
+    entry.spo2_change = calculatePercentChange(entry, previous, 'SpO2')
+  } else {
+    entry.pulse_change = 0
+    entry.body_temperature_change = 0
+    entry.spo2_change = 0
+  }
+
   fetch('/api/predict', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -206,25 +270,29 @@ function handlePredict() {
     .then(response => response.json())
     .then(data => {
       if (data.rule_based_risk) {
-        ruleOutput.textContent = `Overall Risk Category: ${data.rule_based_risk}`
+        ruleOutput.textContent = `Overall Risk Category: ${data.overall_risk_category} | Recommended Next Step: ${data.recommended_next_step}`
       }
       if (data.rf_predicted_health_status !== undefined && data.svm_predicted_health_status !== undefined) {
-        modelOutput.textContent = `RF: ${data.rf_predicted_health_status} | SVM: ${data.svm_predicted_health_status} | Agreement: ${data.model_agreement_status}`
+        modelOutput.textContent = `RF: ${data.rf_predicted_health_status} | SVM: ${data.svm_predicted_health_status} | Agreement: ${data.model_agreement_status} | RF Prob: ${data.random_forest_probability.join(', ')} | SVM Decision: ${data.svm_decision_function.map(value => Number(value).toFixed(3)).join(', ')}`
       }
       if (data.rf_predicted_health_status === 1 && data.svm_predicted_health_status === 1) {
-        alertAudio.play()
+        alertAudio.play().catch(() => {})
       }
       saveToLocal(entry)
     })
-    .catch(() => saveToLocal(readForm()))
+    .catch(() => saveToLocal(entry))
 }
 
 function init() {
+  sessionStartEl.textContent = sessionStart.toLocaleString()
+  setInterval(updateElapsedTimer, 1000)
+
   const existing = JSON.parse(localStorage.getItem('crewSignalEntries') || '[]')
   if (existing.length > 0) {
     updateCharts(existing)
     updateChangeSummary(existing)
   }
+
   updateConnectivityStatus()
   setInterval(updateConnectivityStatus, 4000)
 }

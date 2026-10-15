@@ -1,8 +1,8 @@
 from flask import Flask, request, jsonify, send_from_directory
 import os
-import joblib
 import numpy as np
 import pandas as pd
+import joblib
 from datetime import datetime
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
@@ -20,20 +20,45 @@ rf_model = None
 svm_model = None
 
 
+def normalize_name(name):
+    return str(name).strip().lower().replace(' ', '_')
+
+
 def resolve_columns(df):
-    resolved = {}
-    for column in df.columns:
-        name = str(column).strip()
-        key = name.lower()
-        if 'pulse' in key:
-            resolved['pulse'] = name
+    columns = {}
+    for col in df.columns:
+        key = normalize_name(col)
+        if 'astronaut' in key and 'id' in key:
+            columns['astronaut_id'] = col
+        elif 'astronaut' in key and 'name' in key:
+            columns['astronaut_name'] = col
+        elif 'age' in key:
+            columns['age'] = col
+        elif 'sex' in key:
+            columns['sex'] = col
+        elif 'time' in key:
+            columns['time'] = col
+        elif 'pulse' in key:
+            columns['pulse'] = col
         elif 'temperature' in key or 'temp' in key or 'body' in key:
-            resolved['body_temperature'] = name
-        elif 'spo2' in key or 'oxygen' in key:
-            resolved['SpO2'] = name
+            columns['body_temperature'] = col
+        elif 'spo2' in key or 'spo2' in key or 'oxygen' in key:
+            columns['SpO2'] = col
         elif 'status' in key or 'label' in key or 'health' in key:
-            resolved['status'] = name
-    return resolved
+            columns['status'] = col
+    return columns
+
+
+def safe_to_numeric(series):
+    return pd.to_numeric(series, errors='coerce')
+
+
+def encode_target(series):
+    s = series.astype(str).str.strip()
+    unique = list(dict.fromkeys(s.dropna().tolist()))
+    mapping = {v: idx for idx, v in enumerate(unique)}
+    encoded = s.map(mapping)
+    return encoded.astype(float), mapping
 
 
 def build_models():
@@ -48,30 +73,30 @@ def build_models():
     if missing:
         return None, {'error': 'missing_columns', 'missing': missing, 'available': list(df.columns)}
 
-    feature_columns = [cols['pulse'], cols['body_temperature'], cols['SpO2']]
-    target_column = cols['status']
+    X = df[[cols['pulse'], cols['body_temperature'], cols['SpO2']]].copy()
+    X = X.apply(safe_to_numeric)
+    y_raw = df[cols['status']].copy()
+    y, label_mapping = encode_target(y_raw)
 
-    X = df[feature_columns].copy()
-    y = df[target_column].copy()
-    X = X.apply(pd.to_numeric, errors='coerce')
-    y = pd.to_numeric(y, errors='coerce')
-    valid = X.notna().all(axis=1) & y.notna()
-    X = X[valid]
-    y = y[valid].astype(int)
+    X = X[(X.notna().all(axis=1)) & y.notna()]
+    y = y[(X.notna().all(axis=1)) & y.notna()].astype(int)
+    X = X.loc[y.index]
 
     if len(X) < 10:
         return None, {'error': 'insufficient_data', 'rows': len(X)}
+    if len(np.unique(y)) < 2:
+        return None, {'error': 'insufficient_classes', 'classes': sorted(np.unique(y).tolist())}
 
     rf = Pipeline([
         ('imputer', SimpleImputer(strategy='median')),
         ('scaler', StandardScaler()),
-        ('model', RandomForestClassifier(n_estimators=40, max_depth=7, random_state=42))
+        ('model', RandomForestClassifier(n_estimators=60, max_depth=8, min_samples_leaf=2, random_state=42))
     ])
 
     svm = Pipeline([
         ('imputer', SimpleImputer(strategy='median')),
         ('scaler', StandardScaler()),
-        ('model', SVC(kernel='rbf', probability=True, random_state=42, max_iter=2000))
+        ('model', SVC(kernel='rbf', C=2.0, gamma='scale', probability=True, random_state=42, max_iter=3000))
     ])
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
@@ -81,21 +106,25 @@ def build_models():
     rf_pred = rf.predict(X_test)
     svm_pred = svm.predict(X_test)
 
+    cv_splits = min(3, min(np.bincount(y).min(), 3))
+    if cv_splits < 2:
+        cv_splits = 2
+
     metrics = {
         'rf': {
             'accuracy': round(float(accuracy_score(y_test, rf_pred)), 6),
-            'precision': round(float(precision_score(y_test, rf_pred, zero_division=0)), 6),
-            'recall': round(float(recall_score(y_test, rf_pred, zero_division=0)), 6),
-            'f1_score': round(float(f1_score(y_test, rf_pred, zero_division=0)), 6),
-            'cv_score': round(float(np.mean(cross_val_score(rf, X, y, cv=StratifiedKFold(n_splits=3, shuffle=True, random_state=42)))), 6),
+            'precision': round(float(precision_score(y_test, rf_pred, average='weighted', zero_division=0)), 6),
+            'recall': round(float(recall_score(y_test, rf_pred, average='weighted', zero_division=0)), 6),
+            'f1_score': round(float(f1_score(y_test, rf_pred, average='weighted', zero_division=0)), 6),
+            'cv_score': round(float(np.mean(cross_val_score(rf, X, y, cv=StratifiedKFold(n_splits=cv_splits, shuffle=True, random_state=42)))), 6),
             'confusion_matrix': confusion_matrix(y_test, rf_pred).tolist()
         },
         'svm': {
             'accuracy': round(float(accuracy_score(y_test, svm_pred)), 6),
-            'precision': round(float(precision_score(y_test, svm_pred, zero_division=0)), 6),
-            'recall': round(float(recall_score(y_test, svm_pred, zero_division=0)), 6),
-            'f1_score': round(float(f1_score(y_test, svm_pred, zero_division=0)), 6),
-            'cv_score': round(float(np.mean(cross_val_score(svm, X, y, cv=StratifiedKFold(n_splits=3, shuffle=True, random_state=42)))), 6),
+            'precision': round(float(precision_score(y_test, svm_pred, average='weighted', zero_division=0)), 6),
+            'recall': round(float(recall_score(y_test, svm_pred, average='weighted', zero_division=0)), 6),
+            'f1_score': round(float(f1_score(y_test, svm_pred, average='weighted', zero_division=0)), 6),
+            'cv_score': round(float(np.mean(cross_val_score(svm, X, y, cv=StratifiedKFold(n_splits=cv_splits, shuffle=True, random_state=42)))), 6),
             'confusion_matrix': confusion_matrix(y_test, svm_pred).tolist()
         }
     }
@@ -149,20 +178,20 @@ def predict():
 
     pulse = float(payload['pulse'])
     body_temperature = float(payload['body_temperature'])
-    SpO2 = float(payload['SpO2'])
+    spo2 = float(payload['SpO2'])
+    feature = np.array([[pulse, body_temperature, spo2]], dtype=float)
 
-    feature = np.array([[pulse, body_temperature, SpO2]])
-    rf_prob = rf_model.predict_proba(feature)[0].tolist()
     rf_pred = int(rf_model.predict(feature)[0])
-    svm_prob = svm_model.predict_proba(feature)[0].tolist()
     svm_pred = int(svm_model.predict(feature)[0])
+    rf_prob = rf_model.predict_proba(feature)[0].tolist()
+    svm_prob = svm_model.predict_proba(feature)[0].tolist()
     svm_decision = svm_model.decision_function(feature)[0].tolist()
     agreement = 'agreement' if rf_pred == svm_pred else 'disagreement'
 
-    if pulse > 100 or SpO2 < 90 or body_temperature > 38:
+    if pulse > 100 or spo2 < 90 or body_temperature > 38:
         risk = 'Critical'
         next_step = 'Immediate clinical escalation and repeat measurement within 5 minutes.'
-    elif pulse > 90 or SpO2 < 95 or body_temperature > 37.5:
+    elif pulse > 90 or spo2 < 95 or body_temperature > 37.5:
         risk = 'Moderate'
         next_step = 'Repeat the measurement, log symptoms, and escalate through the approved protocol.'
     else:
@@ -177,11 +206,16 @@ def predict():
         'time': payload.get('time', ''),
         'pulse': pulse,
         'body_temperature': body_temperature,
-        'SpO2': SpO2,
+        'SpO2': spo2,
         'rf_pred': rf_pred,
         'svm_pred': svm_pred,
         'agreement_status': agreement,
-        'timestamp': datetime.utcnow().isoformat()
+        'overall_risk_category': risk,
+        'recommended_next_step': next_step,
+        'timestamp': datetime.utcnow().isoformat(),
+        'pulse_change': payload.get('pulse_change', 0),
+        'body_temperature_change': payload.get('body_temperature_change', 0),
+        'spo2_change': payload.get('spo2_change', 0)
     }
 
     if os.path.exists('records.csv'):
@@ -218,3 +252,4 @@ def voice():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
+

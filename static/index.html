@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -29,18 +29,29 @@
           <div class="field-row">
             <input id="age" type="number" placeholder="Age" required>
             <select id="sex" required>
+              <option value="">Sex</option>
               <option value="M">Male</option>
               <option value="F">Female</option>
               <option value="O">Other</option>
             </select>
           </div>
-          <div class="field-row">
-            <input id="time" placeholder="Time" required>
+          <div class="field-row single">
+            <input id="time" type="text" placeholder="Timestamp" required>
           </div>
           <div class="field-row">
             <input id="pulse" type="number" step="0.1" placeholder="Pulse" required>
             <input id="body_temperature" type="number" step="0.1" placeholder="Body Temperature" required>
             <input id="SpO2" type="number" step="0.1" placeholder="SpO2 Level" required>
+          </div>
+          <div class="kpi-row">
+            <div class="mini-card">
+              <span>Session Start</span>
+              <strong id="sessionStart">--</strong>
+            </div>
+            <div class="mini-card">
+              <span>Elapsed Time</span>
+              <strong id="elapsedTime">00:00:00</strong>
+            </div>
           </div>
           <div class="button-row">
             <button type="button" id="saveLocalBtn">Save Local</button>
@@ -71,7 +82,6 @@
   </div>
 
   <audio id="alertAudio" preload="auto" src="/emergency_voice.mp3"></audio>
-  <script src="/static/idb.js"></script>
   <script src="/static/app.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
