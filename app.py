@@ -15,6 +15,10 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.preprocessing import LabelEncoder
 import threading
+import time
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__, static_folder='static')
 DATA_PATH = os.getenv('DATA_PATH', 'Health data.csv')
@@ -23,7 +27,10 @@ CONFIG_PATH = os.getenv('CONFIG_PATH', 'config.json')
 os.makedirs(MODEL_DIR, exist_ok=True)
 rf_model = None
 svm_model = None
+label_encoder = None
 MODEL_METRICS = None
+TRAINING = False
+TRAIN_THREAD = None
 
 
 def normalize_name(value):
@@ -109,8 +116,33 @@ def load_thresholds():
 THRESHOLDS = load_thresholds()
 
 
+def save_model_bundle(bundle, metrics):
+    bundle['metrics'] = metrics
+    path = os.path.join(MODEL_DIR, 'crew_models.joblib')
+    joblib.dump(bundle, path)
+    logging.info('Model bundle saved to %s', path)
+
+
+def load_models_from_disk():
+    global rf_model, svm_model, label_encoder, MODEL_METRICS
+    path = os.path.join(MODEL_DIR, 'crew_models.joblib')
+    if os.path.exists(path):
+        try:
+            bundle = joblib.load(path)
+            rf_model = bundle.get('rf')
+            svm_model = bundle.get('svm')
+            label_encoder = bundle.get('label_encoder')
+            MODEL_METRICS = bundle.get('metrics')
+            logging.info('Loaded models from %s', path)
+            return True
+        except Exception as e:
+            logging.exception('Failed to load models from disk: %s', e)
+            return False
+    return False
+
+
 def build_models():
-    global rf_model, svm_model, MODEL_METRICS
+    global rf_model, svm_model, label_encoder, MODEL_METRICS
     if not os.path.exists(DATA_PATH):
         return None, {'error': 'data_not_found', 'path': DATA_PATH}
 
@@ -183,63 +215,67 @@ def build_models():
     }
 
     model_bundle = {'rf': rf, 'svm': svm, 'label_encoder': label_encoder, 'feature_columns': feature_cols}
-    joblib.dump(model_bundle, os.path.join(MODEL_DIR, 'crew_models.joblib'))
+    save_model_bundle(model_bundle, metrics)
     rf_model = rf
     svm_model = svm
+    label_encoder = label_encoder
     MODEL_METRICS = metrics
     return metrics, None
 
 
 @app.route('/')
 def index():
+    # serve the simple web UI
     return send_from_directory('static', 'index.html')
 
 
 @app.route('/api/healthcheck')
 def healthcheck():
-    return jsonify({'status': 'ok', 'timestamp': datetime.utcnow().isoformat()})
+    return jsonify({'status': 'ok', 'timestamp': datetime.utcnow().isoformat(), 'model_loaded': bool(MODEL_METRICS)})
 
 
 @app.route('/api/train', methods=['POST'])
-def train_models():
-    metrics, error = build_models()
-    if error:
-        return jsonify(error), 400
-    return jsonify({'status': 'trained', 'metrics': metrics})
+def train_models_endpoint():
+    global TRAINING, TRAIN_THREAD
+    blocking = request.args.get('blocking', 'false').lower() == 'true'
+    if TRAINING:
+        return jsonify({'status': 'training_already_running'}), 202
+
+    def _train():
+        global TRAINING, MODEL_METRICS
+        TRAINING = True
+        logging.info('Background training started')
+        try:
+            metrics, error = build_models()
+            if error:
+                logging.error('Training error: %s', error)
+            else:
+                MODEL_METRICS = metrics
+                logging.info('Training finished')
+        except Exception as e:
+            logging.exception('Unexpected error during training: %s', e)
+        finally:
+            TRAINING = False
+
+    if blocking:
+        _train()
+        return jsonify({'status': 'trained', 'metrics': MODEL_METRICS})
+    else:
+        TRAIN_THREAD = threading.Thread(target=_train, daemon=True)
+        TRAIN_THREAD.start()
+        return jsonify({'status': 'training_started'}), 202
+
+
+@app.route('/api/train/status')
+def train_status():
+    return jsonify({'training': TRAINING})
 
 
 @app.route('/api/metrics')
-def model_metrics():
+def model_metrics_endpoint():
     if MODEL_METRICS:
         return jsonify({'metrics': MODEL_METRICS})
-    return jsonify({}), 204
-
-
-def ensure_models_trained():
-    # Train models (or load) once before serving requests so dashboard can use trained models
-    try:
-        metrics, error = build_models()
-        if error:
-            # If training fails, log to stdout — in production you might want to integrate with proper logging
-            print('Model build error on startup:', error)
-        else:
-            print('Models trained and ready on startup')
-    except Exception as e:
-        print('Unexpected error while training models on startup:', str(e))
-
-
-# Register startup hook in a Flask-version-compatible way; if decorator is unavailable, run in background
-if hasattr(app, 'before_first_request'):
-    app.before_first_request(ensure_models_trained)
-else:
-    # Try before_serving (available in some Flask versions), otherwise run in a background thread
-    try:
-        if hasattr(app, 'before_serving'):
-            app.before_serving(ensure_models_trained)
-        else:
-            threading.Thread(target=ensure_models_trained, daemon=True).start()
-    except Exception:
-        threading.Thread(target=ensure_models_trained, daemon=True).start()
+    return jsonify({'metrics': None}), 204
 
 
 @app.route('/api/predict', methods=['POST'])
@@ -252,12 +288,12 @@ def predict():
 
     model_bundle_path = os.path.join(MODEL_DIR, 'crew_models.joblib')
     if not os.path.exists(model_bundle_path):
-        return jsonify({'error': 'models_not_trained'}), 400
+        return jsonify({'error': 'models_not_trained', 'message': 'No trained model found. Trigger /api/train'}), 400
 
     bundle = joblib.load(model_bundle_path)
-    rf_model = bundle['rf']
-    svm_model = bundle['svm']
-    label_encoder = bundle['label_encoder']
+    rf_model_local = bundle['rf']
+    svm_model_local = bundle['svm']
+    label_encoder_local = bundle['label_encoder']
 
     record = {
         'astronaut_id': str(payload['astronaut_id']).strip(),
@@ -284,14 +320,14 @@ def predict():
         'SpO2': record['SpO2']
     }])
 
-    rf_pred = int(rf_model.predict(feature)[0])
-    svm_pred = int(svm_model.predict(feature)[0])
-    rf_prob = rf_model.predict_proba(feature)[0].tolist()
-    svm_prob = svm_model.predict_proba(feature)[0].tolist()
-    svm_decision = svm_model.decision_function(feature)[0].tolist()
+    rf_pred = int(rf_model_local.predict(feature)[0])
+    svm_pred = int(svm_model_local.predict(feature)[0])
+    rf_prob = rf_model_local.predict_proba(feature)[0].tolist()
+    svm_prob = svm_model_local.predict_proba(feature)[0].tolist()
+    svm_decision = svm_model_local.decision_function(feature)[0].tolist()
     agreement = 'agreement' if rf_pred == svm_pred else 'disagreement'
 
-    label_map = {idx: label for idx, label in enumerate(label_encoder.classes_)}
+    label_map = {idx: label for idx, label in enumerate(label_encoder_local.classes_)}
     rf_label = label_map.get(rf_pred, str(rf_pred))
     svm_label = label_map.get(svm_pred, str(svm_pred))
 
@@ -322,7 +358,7 @@ def predict():
         'overall_risk_category': risk,
         'recommended_next_step': next_step,
         'rule_based_risk': risk,
-        'worst_condition_label': str(label_encoder.classes_[-1]) if len(label_encoder.classes_) else ''
+        'worst_condition_label': str(label_encoder_local.classes_[-1]) if len(label_encoder_local.classes_) else ''
     })
 
 
@@ -336,6 +372,17 @@ def records():
 @app.route('/emergency_voice.mp3')
 def voice():
     return send_from_directory('.', 'emergency_voice.mp3')
+
+
+# Try to load models at startup (non-blocking)
+try:
+    loaded = load_models_from_disk()
+    if loaded:
+        logging.info('Models available at startup')
+    else:
+        logging.info('No pre-trained model found at startup — use /api/train to train')
+except Exception:
+    logging.exception('Error while loading models at startup')
 
 
 if __name__ == '__main__':
