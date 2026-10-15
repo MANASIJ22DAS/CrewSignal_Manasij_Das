@@ -275,9 +275,12 @@ function handlePredict() {
       if (data.rf_predicted_health_status !== undefined && data.svm_predicted_health_status !== undefined) {
         modelOutput.textContent = `RF: ${data.rf_predicted_health_status} | SVM: ${data.svm_predicted_health_status} | Agreement: ${data.model_agreement_status} | RF Prob: ${data.random_forest_probability.join(', ')} | SVM Decision: ${data.svm_decision_function.map(value => Number(value).toFixed(3)).join(', ')}`
       }
-      if (data.rf_predicted_health_status === 1 && data.svm_predicted_health_status === 1) {
+
+      const worstLabel = Number(data.worst_condition_label)
+      if (Number(data.rf_predicted_health_status) === worstLabel && Number(data.svm_predicted_health_status) === worstLabel) {
         alertAudio.play().catch(() => {})
       }
+
       saveToLocal(entry)
     })
     .catch(() => saveToLocal(entry))

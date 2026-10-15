@@ -42,7 +42,7 @@ def resolve_columns(df):
             columns['pulse'] = col
         elif 'temperature' in key or 'temp' in key or 'body' in key:
             columns['body_temperature'] = col
-        elif 'spo2' in key or 'spo2' in key or 'oxygen' in key:
+        elif 'spo2' in key or 'oxygen' in key:
             columns['SpO2'] = col
         elif 'status' in key or 'label' in key or 'health' in key:
             columns['status'] = col
@@ -76,11 +76,11 @@ def build_models():
     X = df[[cols['pulse'], cols['body_temperature'], cols['SpO2']]].copy()
     X = X.apply(safe_to_numeric)
     y_raw = df[cols['status']].copy()
-    y, label_mapping = encode_target(y_raw)
+    y, _ = encode_target(y_raw)
 
-    X = X[(X.notna().all(axis=1)) & y.notna()]
-    y = y[(X.notna().all(axis=1)) & y.notna()].astype(int)
-    X = X.loc[y.index]
+    valid = X.notna().all(axis=1) & y.notna()
+    X = X[valid]
+    y = y[valid].astype(int)
 
     if len(X) < 10:
         return None, {'error': 'insufficient_data', 'rows': len(X)}
@@ -187,6 +187,7 @@ def predict():
     svm_prob = svm_model.predict_proba(feature)[0].tolist()
     svm_decision = svm_model.decision_function(feature)[0].tolist()
     agreement = 'agreement' if rf_pred == svm_pred else 'disagreement'
+    worst_condition_label = int(max(rf_model.classes_))
 
     if pulse > 100 or spo2 < 90 or body_temperature > 38:
         risk = 'Critical'
@@ -234,7 +235,8 @@ def predict():
         'svm_decision_function': svm_decision,
         'overall_risk_category': risk,
         'recommended_next_step': next_step,
-        'rule_based_risk': risk
+        'rule_based_risk': risk,
+        'worst_condition_label': worst_condition_label
     })
 
 
@@ -252,4 +254,3 @@ def voice():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
-
