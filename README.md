@@ -1,33 +1,40 @@
-# CrewSignal
+# CrewSignal - Local ML & Dashboard
 
-CrewSignal — Personal Health Trend Support for Long-Duration Missions
+This is a self-contained pipeline to compute the requested outputs locally (no external APIs). It trains Random Forest and SVM on local data, computes performance metrics (accuracy, precision, recall, F1, CV), confusion matrices, and saves plots and a JSON results file. A static dashboard reads those files for display and performs simple browser connectivity checks.
 
-Quick start (local):
+## Usage
 
-1. Create a Python virtual environment and install dependencies:
+1. Add your CSV dataset at `data/health_data.csv`. Required columns:
+   - heart_rate
+   - temperature
+   - spo2
+   - timestamp (optional)
+   - label (optional) — if absent, the script will create labels using a simple rule.
 
-   python3 -m venv venv
-   source venv/bin/activate
+2. Install dependencies:
+   ```
    pip install -r requirements.txt
+   ```
 
-2. Start the Flask app locally:
+3. Run training & evaluation:
+   ```
+   python train_and_evaluate.py --data data/health_data.csv
+   ```
 
-   export FLASK_APP=app.py
-   python app.py
+   This writes `outputs/results.json` and images to `outputs/`.
 
-   The app will be available on http://0.0.0.0:5000/
+4. Serve the repo locally (so the dashboard can fetch results.json):
+   ```
+   python -m http.server 8000
+   ```
+   Open: http://localhost:8000/dashboard.html
 
-3. Use the web UI at `/` to train models (uses `Health data.csv` in repository root) and to enter measurements for predictions.
+## What you get
+- Model metrics for Random Forest and SVM: accuracy, precision, recall, f1_score, cv_score, confusion matrices.
+- Confusion matrix heatmaps and trend charts saved to `outputs/`.
+- `outputs/results.json` contains all numeric outputs that the dashboard reads.
+- Dashboard performs connectivity checks using `navigator.onLine`, attempts to fetch `outputs/results.json` with timeout, and uses `localStorage` as a fallback cache.
 
-Render deployment:
-
-- The repository includes a `Procfile` and `requirements.txt`. Create a new Web Service on Render from this GitHub repository, set the Environment to "Python", and the Start Command is:
-
-  gunicorn app:app
-
-Notes:
-
-- The app reads the training data directly from `Health data.csv` in the repository root.
-- No external datasets are required or generated.
-- Offline support is provided via a service worker and IndexedDB in the browser.
-
+## Note
+- No external APIs are invoked. Everything is computed locally.
+- If you'd like, I can add these files directly to your repository and open a pull request; say "Add files" and confirm the repository to write to.

@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>CrewSignal - Local Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 16px; }
+    .grid { display:flex; gap:16px; flex-wrap:wrap; }
+    .card { border:1px solid #ddd; padding:12px; border-radius:6px; width:320px; }
+    img { max-width:100%; height:auto; display:block; margin:6px 0; }
+    .status-high { color:#b00020; font-weight:bold; }
+    .status-moderate { color:#ff8c00; font-weight:bold; }
+    .status-low { color:#006400; font-weight:bold; }
+  </style>
+</head>
+<body>
+  <h2>CrewSignal — Local Results</h2>
+  <div>
+    <strong>Connectivity:</strong> <span id="connectivity-status">checking...</span>
+  </div>
+  <hr>
+  <div class="grid">
+    <div class="card">
+      <h3>Rule Based</h3>
+      <div>Overall Risk: <span id="rule-risk">-</span></div>
+      <div>Recommended Next Step: <span id="rule-step">-</span></div>
+    </div>
+
+    <div class="card">
+      <h3>Model Agreement & Predictions</h3>
+      <div>RF Predicted Status: <span id="rf-status">-</span></div>
+      <div>SVM Predicted Status: <span id="svm-status">-</span></div>
+      <div>Agreement: <span id="agreement">-</span></div>
+      <div>RF Probability (last): <span id="rf-prob">-</span></div>
+      <div>SVM Probability (last): <span id="svm-prob">-</span></div>
+    </div>
+
+    <div class="card" id="performance-card">
+      <h3>Model Performance</h3>
+      <div id="perf-list">loading...</div>
+      <img id="perf-chart" src="" alt="Model performance comparison">
+    </div>
+
+    <div class="card">
+      <h3>Charts</h3>
+      <div><strong>Heart Rate Trend</strong><img id="hr-trend" src="" alt="Heart rate trend"></div>
+      <div><strong>Temperature Trend</strong><img id="temp-trend" src="" alt="Temperature trend"></div>
+      <div><strong>SpO2 Trend</strong><img id="spo2-trend" src="" alt="SPO2 trend"></div>
+    </div>
+
+    <div class="card">
+      <h3>Confusion Matrices</h3>
+      <div><strong>Random Forest</strong><img id="rf-conf" src="" alt="rf confusion"></div>
+      <div><strong>SVM</strong><img id="svm-conf" src="" alt="svm confusion"></div>
+    </div>
+  </div>
+
+  <script src="static/js/dashboard.js"></script>
+</body>
+</html>

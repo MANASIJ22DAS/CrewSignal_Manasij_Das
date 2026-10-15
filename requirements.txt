@@ -1,6 +1,5 @@
-Flask
 pandas
 numpy
 scikit-learn
-joblib
-gunicorn
+matplotlib
+seaborn
