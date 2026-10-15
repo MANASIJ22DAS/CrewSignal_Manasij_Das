@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, send_from_directory
 import os
+import json
 import numpy as np
 import pandas as pd
 import joblib
@@ -17,6 +18,7 @@ from sklearn.preprocessing import LabelEncoder
 app = Flask(__name__, static_folder='static')
 DATA_PATH = os.getenv('DATA_PATH', 'Health data.csv')
 MODEL_DIR = os.getenv('MODEL_DIR', 'models')
+CONFIG_PATH = os.getenv('CONFIG_PATH', 'config.json')
 os.makedirs(MODEL_DIR, exist_ok=True)
 rf_model = None
 svm_model = None
@@ -74,6 +76,35 @@ def prepare_dataframe(df):
     result['status'] = result['status'].astype(str).str.strip()
     result = result.dropna(subset=['astronaut_id', 'astronaut_name', 'age', 'sex', 'time', 'pulse', 'body_temperature', 'SpO2', 'status'])
     return result.reset_index(drop=True)
+
+
+def load_thresholds():
+    config = {}
+    try:
+        if os.path.exists(CONFIG_PATH):
+            with open(CONFIG_PATH, 'r') as f:
+                config = json.load(f)
+    except Exception:
+        config = {}
+    def get_float(key, default):
+        val = os.getenv(key)
+        if val is not None:
+            try:
+                return float(val)
+            except Exception:
+                return float(default)
+        return float(config.get(key, default))
+    thresholds = {
+        'PULSE_CRITICAL': get_float('PULSE_CRITICAL', 100),
+        'SPO2_CRITICAL': get_float('SPO2_CRITICAL', 90),
+        'TEMP_CRITICAL': get_float('TEMP_CRITICAL', 38),
+        'PULSE_MODERATE': get_float('PULSE_MODERATE', 90),
+        'SPO2_MODERATE': get_float('SPO2_MODERATE', 95),
+        'TEMP_MODERATE': get_float('TEMP_MODERATE', 37.5)
+    }
+    return thresholds
+
+THRESHOLDS = load_thresholds()
 
 
 def build_models():
@@ -227,10 +258,17 @@ def predict():
     rf_label = label_map.get(rf_pred, str(rf_pred))
     svm_label = label_map.get(svm_pred, str(svm_pred))
 
-    if record['pulse'] > 100 or record['SpO2'] < 90 or record['body_temperature'] > 38:
+    pulse_crit = THRESHOLDS['PULSE_CRITICAL']
+    spo2_crit = THRESHOLDS['SPO2_CRITICAL']
+    temp_crit = THRESHOLDS['TEMP_CRITICAL']
+    pulse_mod = THRESHOLDS['PULSE_MODERATE']
+    spo2_mod = THRESHOLDS['SPO2_MODERATE']
+    temp_mod = THRESHOLDS['TEMP_MODERATE']
+
+    if record['pulse'] > pulse_crit or record['SpO2'] < spo2_crit or record['body_temperature'] > temp_crit:
         risk = 'Critical'
         next_step = 'Immediate clinical escalation and repeat measurement within 5 minutes.'
-    elif record['pulse'] > 90 or record['SpO2'] < 95 or record['body_temperature'] > 37.5:
+    elif record['pulse'] > pulse_mod or record['SpO2'] < spo2_mod or record['body_temperature'] > temp_mod:
         risk = 'Moderate'
         next_step = 'Repeat the measurement, log symptoms, and escalate through the approved protocol.'
     else:
