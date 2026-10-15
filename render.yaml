@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: crew-signal
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    healthCheckPath: /api/healthcheck
+    autoDeploy: true
+    envVars:
+      - key: DATA_PATH
+        value: Health data.csv
+      - key: MODEL_DIR
+        value: models
+      - key: FLASK_ENV
+        value: production
