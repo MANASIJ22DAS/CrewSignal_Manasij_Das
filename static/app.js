@@ -268,9 +268,27 @@ function handlePredict() {
       if (data.rf_predicted_health_status !== undefined && data.svm_predicted_health_status !== undefined) {
         modelOutput.textContent = `RF: ${data.rf_predicted_health_status} | SVM: ${data.svm_predicted_health_status} | Agreement: ${data.model_agreement_status}`
       }
-      if (data.rf_predicted_health_status === 1 && data.svm_predicted_health_status === 1) {
-        try { alertAudio.play() } catch (e) {}
+
+      // Robust emergency trigger: compare returned labels (strings) and use rule-based / worst-condition hints from API
+      try {
+        const rfLabel = data.rf_predicted_health_status
+        const svmLabel = data.svm_predicted_health_status
+        const worstLabel = (data.worst_condition_label || '').toString()
+        const ruleRisk = (data.rule_based_risk || data.overall_risk_category || '').toString()
+
+        const modelsAgree = rfLabel && svmLabel && rfLabel === svmLabel
+        const isCriticalByRule = ruleRisk && ruleRisk.toLowerCase() === 'critical'
+        const predictedWorst = worstLabel && rfLabel === worstLabel && svmLabel === worstLabel
+
+        // Play alert if rule-based risk is Critical OR models agree and predict the worst condition
+        if (isCriticalByRule || (modelsAgree && predictedWorst) || (modelsAgree && isCriticalByRule)) {
+          try { alertAudio.play() } catch (e) {}
+        }
+      } catch (e) {
+        // fallback to previous behavior if something unexpected in response
+        try { if (data.rf_predicted_health_status === 1 && data.svm_predicted_health_status === 1) alertAudio.play() } catch (e) {}
       }
+
       saveToLocal(entry)
     })
     .catch(() => saveToLocal(entry))
