@@ -36,7 +36,7 @@
           <div class="field-row">
             <div class="field-wrap">
               <label class="sr-only" for="age">Age</label>
-              <input id="age" type="number" placeholder="Age" required>
+              <input id="age" type="number" min="1" placeholder="Age" required>
             </div>
             <div class="field-wrap">
               <label class="sr-only" for="sex">Sex</label>
@@ -48,24 +48,19 @@
               </select>
             </div>
           </div>
-          <div class="field-row single">
-            <div class="field-wrap">
-              <label class="sr-only" for="time">Timestamp</label>
-              <input id="time" type="text" placeholder="Timestamp" required>
-            </div>
-          </div>
+          <!-- Timestamp removed: time will be set automatically to current time on submit -->
           <div class="field-row triple">
             <div class="field-wrap">
               <label class="sr-only" for="pulse">Pulse</label>
-              <input id="pulse" type="number" step="0.1" placeholder="Pulse" required>
+              <input id="pulse" type="number" step="0.1" min="1" placeholder="Pulse" required>
             </div>
             <div class="field-wrap">
               <label class="sr-only" for="body_temperature">Body Temperature</label>
-              <input id="body_temperature" type="number" step="0.1" placeholder="Body Temperature" required>
+              <input id="body_temperature" type="number" step="0.1" min="0.1" placeholder="Body Temperature" required>
             </div>
             <div class="field-wrap">
               <label class="sr-only" for="SpO2">SpO2 Level</label>
-              <input id="SpO2" type="number" step="0.1" placeholder="SpO2 Level" required>
+              <input id="SpO2" type="number" step="0.1" min="1" placeholder="SpO2 Level" required>
             </div>
           </div>
           <div class="kpi-row">
