@@ -4,7 +4,7 @@ import json
 import numpy as np
 import pandas as pd
 import joblib
-from datetime import datetime
+from datetime import datetime, timedelta
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
@@ -141,12 +141,55 @@ def load_models_from_disk():
     return False
 
 
-def build_models():
-    global rf_model, svm_model, label_encoder, MODEL_METRICS
-    if not os.path.exists(DATA_PATH):
-        return None, {'error': 'data_not_found', 'path': DATA_PATH}
+def _make_synthetic_dataset(n_samples=120):
+    # Create a simple synthetic dataset that resembles the expected schema
+    rng = np.random.default_rng(42)
+    ids = [f'A{(i%10)+1}' for i in range(n_samples)]
+    names = [f'Crew_{(i%10)+1}' for i in range(n_samples)]
+    ages = rng.integers(22, 60, size=n_samples)
+    sexes = rng.choice(['M','F'], size=n_samples)
+    start = datetime.utcnow() - timedelta(hours=1)
+    times = [start + timedelta(seconds=int(i*30)) for i in range(n_samples)]
+    # base vitals around normal with some noise
+    pulse = (rng.normal(75,10,size=n_samples)).clip(40,160)
+    temp = (rng.normal(36.6,0.6,size=n_samples)).clip(34,41)
+    spo2 = (rng.normal(97,2,size=n_samples)).clip(80,100)
+    # rule-based status
+    status = []
+    for p,t,s in zip(pulse,temp,spo2):
+        st = 'healthy'
+        if (s < THRESHOLDS['SPO2_CRITICAL']) or (t > THRESHOLDS['TEMP_CRITICAL']) or (p > THRESHOLDS['PULSE_CRITICAL']):
+            st = 'unhealthy'
+        elif (s < THRESHOLDS['SPO2_MODERATE']) or (t > THRESHOLDS['TEMP_MODERATE']) or (p > THRESHOLDS['PULSE_MODERATE']):
+            st = rng.choice(['healthy','unhealthy'], p=[0.6,0.4])
+        status.append(st)
+    df = pd.DataFrame({
+        'astronaut_id': ids,
+        'astronaut_name': names,
+        'age': ages,
+        'sex': sexes,
+        'time': times,
+        'pulse': pulse,
+        'body_temperature': temp,
+        'SpO2': spo2,
+        'status': status
+    })
+    return df
 
-    df = pd.read_csv(DATA_PATH)
+
+def build_models():
+    """
+    Build models from DATA_PATH if available. If DATA_PATH is missing, generate a small synthetic dataset
+    so the app works out-of-the-box. Returns (metrics, error) where error is None on success.
+    """
+    global rf_model, svm_model, label_encoder, MODEL_METRICS
+
+    if not os.path.exists(DATA_PATH):
+        logging.warning('Data path %s not found — generating synthetic dataset for demo/training', DATA_PATH)
+        df = _make_synthetic_dataset()
+    else:
+        df = pd.read_csv(DATA_PATH)
+
     try:
         df = prepare_dataframe(df)
     except ValueError as exc:
@@ -380,7 +423,7 @@ try:
     if loaded:
         logging.info('Models available at startup')
     else:
-        logging.info('No pre-trained model found at startup — use /api/train to train')
+        logging.info('No pre-trained model found at startup — using synthetic data for demo; call /api/train to retrain with your CSV')
 except Exception:
     logging.exception('Error while loading models at startup')
 
