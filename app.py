@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify, send_from_directory
 import os
-import json
 import joblib
 import numpy as np
 import pandas as pd
@@ -30,7 +29,7 @@ def resolve_columns(df):
             resolved['pulse'] = name
         elif 'temperature' in key or 'temp' in key or 'body' in key:
             resolved['body_temperature'] = name
-        elif 'spo2' in key or 'spo2' in key or 'oxygen' in key:
+        elif 'spo2' in key or 'oxygen' in key:
             resolved['SpO2'] = name
         elif 'status' in key or 'label' in key or 'health' in key:
             resolved['status'] = name
@@ -148,18 +147,27 @@ def predict():
         else:
             return jsonify({'error': 'models_not_trained'}), 400
 
-    feature = np.array([[float(payload['pulse']), float(payload['body_temperature']), float(payload['SpO2'])]])
+    pulse = float(payload['pulse'])
+    body_temperature = float(payload['body_temperature'])
+    SpO2 = float(payload['SpO2'])
+
+    feature = np.array([[pulse, body_temperature, SpO2]])
     rf_prob = rf_model.predict_proba(feature)[0].tolist()
     rf_pred = int(rf_model.predict(feature)[0])
     svm_prob = svm_model.predict_proba(feature)[0].tolist()
     svm_pred = int(svm_model.predict(feature)[0])
     svm_decision = svm_model.decision_function(feature)[0].tolist()
     agreement = 'agreement' if rf_pred == svm_pred else 'disagreement'
-    rule = 'low_risk'
-    if float(payload['pulse']) > 100 or float(payload['SpO2']) < 90 or float(payload['body_temperature']) > 38:
-        rule = 'high_risk'
-    elif float(payload['pulse']) > 90 or float(payload['SpO2']) < 95 or float(payload['body_temperature']) > 37.5:
-        rule = 'moderate_risk'
+
+    if pulse > 100 or SpO2 < 90 or body_temperature > 38:
+        risk = 'Critical'
+        next_step = 'Immediate clinical escalation and repeat measurement within 5 minutes.'
+    elif pulse > 90 or SpO2 < 95 or body_temperature > 37.5:
+        risk = 'Moderate'
+        next_step = 'Repeat the measurement, log symptoms, and escalate through the approved protocol.'
+    else:
+        risk = 'Low'
+        next_step = 'Continue routine monitoring and log any new symptoms.'
 
     record = {
         'astronaut_id': payload.get('astronaut_id', ''),
@@ -167,9 +175,9 @@ def predict():
         'age': payload.get('age', ''),
         'sex': payload.get('sex', ''),
         'time': payload.get('time', ''),
-        'pulse': float(payload['pulse']),
-        'body_temperature': float(payload['body_temperature']),
-        'SpO2': float(payload['SpO2']),
+        'pulse': pulse,
+        'body_temperature': body_temperature,
+        'SpO2': SpO2,
         'rf_pred': rf_pred,
         'svm_pred': svm_pred,
         'agreement_status': agreement,
@@ -188,10 +196,11 @@ def predict():
         'svm_predicted_health_status': svm_pred,
         'model_agreement_status': agreement,
         'random_forest_probability': rf_prob,
+        'svm_probability': svm_prob,
         'svm_decision_function': svm_decision,
-        'rule_based_risk': rule,
-        'rf_probability': rf_prob,
-        'svm_probability': svm_prob
+        'overall_risk_category': risk,
+        'recommended_next_step': next_step,
+        'rule_based_risk': risk
     })
 
 
@@ -209,54 +218,3 @@ def voice():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
