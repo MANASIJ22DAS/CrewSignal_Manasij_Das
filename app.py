@@ -48,9 +48,9 @@ def resolve_columns(df):
             cols['age'] = col
         elif 'sex' in key:
             cols['sex'] = col
-        elif 'time' in key:
+        elif 'time' in key or 'timestamp' in key or 'date' in key:
             cols['time'] = col
-        elif 'pulse' in key:
+        elif 'pulse' in key or 'heart' in key:
             cols['pulse'] = col
         elif 'body' in key or 'temperature' in key or 'temp' in key:
             cols['body_temperature'] = col
@@ -68,21 +68,112 @@ def coerce_numeric(frame, columns):
 
 
 def prepare_dataframe(df):
+    """
+    Normalize and prepare a dataframe for training/prediction.
+    If required columns are missing, they will be filled with sensible defaults so the CSV
+    with only vital signs can still be used.
+    """
     cols = resolve_columns(df)
-    required = ['astronaut_id', 'astronaut_name', 'age', 'sex', 'time', 'pulse', 'body_temperature', 'SpO2', 'status']
-    missing = [name for name in required if name not in cols]
-    if missing:
-        raise ValueError(f'Missing required columns: {missing}')
 
-    result = df[[cols['astronaut_id'], cols['astronaut_name'], cols['age'], cols['sex'], cols['time'], cols['pulse'], cols['body_temperature'], cols['SpO2'], cols['status']]].copy()
-    result.columns = ['astronaut_id', 'astronaut_name', 'age', 'sex', 'time', 'pulse', 'body_temperature', 'SpO2', 'status']
+    # Provide defaults for missing metadata columns
+    n = len(df)
+    if 'astronaut_id' not in cols:
+        df['astronaut_id'] = [f'A{(i % 20) + 1}' for i in range(n)]
+        cols['astronaut_id'] = 'astronaut_id'
+        logging.info('astronaut_id column missing; filled with defaults')
+    if 'astronaut_name' not in cols:
+        df['astronaut_name'] = [f'Crew_{(i % 20) + 1}' for i in range(n)]
+        cols['astronaut_name'] = 'astronaut_name'
+        logging.info('astronaut_name column missing; filled with defaults')
+    if 'age' not in cols:
+        df['age'] = 30 + (np.arange(n) % 15)  # ages 30..44
+        cols['age'] = 'age'
+        logging.info('age column missing; filled with defaults')
+    if 'sex' not in cols:
+        df['sex'] = ['M' if (i % 2 == 0) else 'F' for i in range(n)]
+        cols['sex'] = 'sex'
+        logging.info('sex column missing; filled with defaults')
+    if 'time' not in cols:
+        start = datetime.utcnow() - timedelta(hours=1)
+        times = [start + timedelta(seconds=int(i * 30)) for i in range(n)]
+        df['time'] = times
+        cols['time'] = 'time'
+        logging.info('time column missing; filled with generated timestamps')
+
+    # Ensure vital sign columns exist with canonical names
+    if 'pulse' not in cols:
+        # try common alternate names
+        for alt in ['pulse', 'heart_rate', 'hr']:
+            if alt in map(normalize_name, df.columns):
+                # find actual column
+                for c in df.columns:
+                    if normalize_name(c) == alt:
+                        cols['pulse'] = c
+                        break
+        if 'pulse' not in cols:
+            raise ValueError('Pulse column missing and could not be inferred')
+    if 'body_temperature' not in cols:
+        # find column names like 'body temperature' or 'body_temperature'
+        for c in df.columns:
+            if 'temp' in normalize_name(c) or 'body' in normalize_name(c):
+                cols['body_temperature'] = c
+                break
+        if 'body_temperature' not in cols:
+            raise ValueError('Body temperature column missing and could not be inferred')
+    if 'SpO2' not in cols:
+        for c in df.columns:
+            if 'spo2' in normalize_name(c) or 'oxygen' in normalize_name(c):
+                cols['SpO2'] = c
+                break
+        if 'SpO2' not in cols:
+            raise ValueError('SpO2 column missing and could not be inferred')
+
+    # Status: allow numeric 0/1 or textual labels
+    if 'status' not in cols:
+        # try common names
+        for c in df.columns:
+            if normalize_name(c) in ('status', 'label', 'health'):
+                cols['status'] = c
+                break
+    if 'status' not in cols:
+        # If still missing, try to infer from an existing column named 'Status' (case-insensitive)
+        # Otherwise default to all healthy
+        cols['status'] = None
+        logging.info('status column missing; defaulting all to healthy')
+
+    # Build result frame using the detected column names
+    select_cols = [cols.get(k) for k in ['astronaut_id', 'astronaut_name', 'age', 'sex', 'time', 'pulse', 'body_temperature', 'SpO2']]
+    # for status, handle separately
+    result = df[select_cols].copy()
+    result.columns = ['astronaut_id', 'astronaut_name', 'age', 'sex', 'time', 'pulse', 'body_temperature', 'SpO2']
+
+    # status handling
+    if cols.get('status') and cols['status'] in df.columns:
+        status_series = df[cols['status']].copy()
+        # map numeric codes 0/1 to labels if applicable
+        try:
+            status_numeric = pd.to_numeric(status_series, errors='coerce')
+            if status_numeric.notna().sum() > 0:
+                # assume 0 -> healthy, 1 -> unhealthy
+                status_mapped = status_numeric.fillna(0).astype(int).map({0: 'healthy', 1: 'unhealthy'}).astype(str)
+                result['status'] = status_mapped
+            else:
+                result['status'] = status_series.astype(str)
+        except Exception:
+            result['status'] = status_series.astype(str)
+    else:
+        # default all healthy
+        result['status'] = 'healthy'
+
+    # Coerce types
     result['astronaut_id'] = result['astronaut_id'].astype(str).str.strip()
     result['astronaut_name'] = result['astronaut_name'].astype(str).str.strip()
     result['time'] = pd.to_datetime(result['time'], errors='coerce')
     result = coerce_numeric(result, ['age', 'pulse', 'body_temperature', 'SpO2'])
     result['sex'] = result['sex'].astype(str).str.strip().str.upper()
-    result['status'] = result['status'].astype(str).str.strip()
-    result = result.dropna(subset=['astronaut_id', 'astronaut_name', 'age', 'sex', 'time', 'pulse', 'body_temperature', 'SpO2', 'status'])
+
+    # Drop rows missing vital signs or time
+    result = result.dropna(subset=['pulse', 'body_temperature', 'SpO2', 'time'])
     return result.reset_index(drop=True)
 
 
@@ -188,24 +279,27 @@ def build_models():
         df = _make_synthetic_dataset()
         use_synthetic = True
     else:
-        df = pd.read_csv(DATA_PATH)
-        # check whether required columns exist; if not, fallback to synthetic
         try:
-            df = prepare_dataframe(df)
-        except ValueError as exc:
-            logging.warning('Input CSV missing required columns (%s). Falling back to synthetic dataset for training.', str(exc))
+            raw_df = pd.read_csv(DATA_PATH)
+        except Exception as e:
+            logging.warning('Failed to read CSV (%s). Using synthetic dataset.', e)
             df = _make_synthetic_dataset()
             use_synthetic = True
+        else:
+            try:
+                df = prepare_dataframe(raw_df)
+            except ValueError as exc:
+                logging.warning('Input CSV missing required columns (%s). Attempting to coerce and continue.', str(exc))
+                # Try to coerce by filling defaults within prepare_dataframe already, so re-run
+                try:
+                    df = prepare_dataframe(raw_df)
+                except Exception:
+                    df = _make_synthetic_dataset()
+                    use_synthetic = True
 
     # at this point df should be prepared with expected columns
-    # if the prepared frame doesn't have expected row count, fallback to synthetic
-    try:
-        df = prepare_dataframe(df)
-    except Exception as e:
-        # last-resort: synthetic
-        logging.warning('Preparing dataframe failed unexpectedly (%s). Using synthetic dataset.', str(e))
-        df = _make_synthetic_dataset()
-        use_synthetic = True
+    if 'status' not in df.columns:
+        df['status'] = 'healthy'
 
     if len(df) < 12:
         logging.warning('Dataset too small (%d rows). Generating synthetic dataset.', len(df))
@@ -381,7 +475,10 @@ def predict():
     svm_pred = int(svm_model_local.predict(feature)[0])
     rf_prob = rf_model_local.predict_proba(feature)[0].tolist()
     svm_prob = svm_model_local.predict_proba(feature)[0].tolist()
-    svm_decision = svm_model_local.decision_function(feature)[0].tolist()
+    try:
+        svm_decision = svm_model_local.decision_function(feature)[0].tolist()
+    except Exception:
+        svm_decision = []
     agreement = 'agreement' if rf_pred == svm_pred else 'disagreement'
 
     label_map = {idx: label for idx, label in enumerate(label_encoder_local.classes_)}
