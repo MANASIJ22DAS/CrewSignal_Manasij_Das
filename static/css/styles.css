@@ -1,0 +1,49 @@
+/* styles.css - basic, self-contained styles for the prediction UI */
+:root{
+  --max-width:700px;
+  --gap:12px;
+  --accent:#0275d8;
+  --danger:#b00020;
+}
+body{
+  font-family: Arial, Helvetica, sans-serif;
+  margin: 30px;
+  background: #f7f9fb;
+  color:#111;
+}
+.container{
+  max-width: var(--max-width);
+  margin: 0 auto;
+  background: #fff;
+  padding: 18px;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+}
+label{ display:block; margin-top:var(--gap); font-weight:600; }
+input, select, textarea{
+  width:100%;
+  padding:10px 8px;
+  margin-top:6px;
+  border:1px solid #d6dbe0;
+  border-radius:6px;
+  box-sizing:border-box;
+}
+button{
+  margin-top:14px;
+  padding:10px 16px;
+  background: var(--accent);
+  color:#fff;
+  border:none;
+  border-radius:6px;
+  cursor:pointer;
+}
+button:hover{ filter:brightness(0.95); }
+pre#result{
+  background:#f1f5f9;
+  padding:12px;
+  border-radius:6px;
+  overflow:auto;
+}
+@media (max-width:480px){
+  .container{ margin:12px; padding:12px }
+}
